@@ -1,0 +1,395 @@
+---
+title: "EDAV_Final_Project"
+author: "Yadin Rozov, Kun Tao"
+date: "From 10/26/2018 to "
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE, 
+                      cache = TRUE)
+
+options(scipen=999) 
+```
+
+## Introduction
+
+The Federal Student Loan program is a key funding mechanism for individuals in the United States to puersue higher education.  It has grown very quickly in the last two decades and now loan outstandings make up the biggest component of the Federal Government's balance sheet.  We attempt to look at data get a better understanding of this program and the potential impact that student lending could have on the borrowers and the economy
+
+## Total Size of the Market and Age of People Carrying Debt
+* Overview:
+We got our data from:
+- NY FED
+- D. ED
+
+Below Graphs show the growth in total debt, and growth in GDP from 2005 to 2017.  The third graph shows how the debt load distribution roughly across three generations: millenials, generation X and baby boomers (respectively aged up to 30, 30-50, and greater than 50)  as a share of the total.  Curiosly it shows that the debt load is heavily concentrated in the middle generation or gen X.  Interesingly the younger generation (under 30 as of 2017) is relatively not carrying as much debt as earlier generations.  
+
+```{r cars, echo = FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(wbstats)
+library(choroplethr)
+library(choroplethrZip)
+library(openintro)
+
+
+aggByAgg <- read_csv('Agg_By_Age_NYFED.csv',col_names = TRUE)
+
+US_GDP <- wb(country = "USA", indicator = "NY.GDP.MKTP.CD", startdate = 2004, enddate = 2017)  %>% mutate(value = value/1000000000, Year = as.integer(date)) %>% select("Year","value")
+
+aggByAgg <- inner_join(aggByAgg,US_GDP,by = "Year")
+aggByAgg$percent_of_total <- aggByAgg$Total / aggByAgg$value
+aggByAgg$percent_of_total_youngsters <- aggByAgg$`0` / aggByAgg$Total
+aggByAgg$percent_of_total_midage <- (aggByAgg$`30` + aggByAgg$`40`) / aggByAgg$Total
+aggByAgg$percent_of_total_lateage <- (aggByAgg$`50` + aggByAgg$`60`) / aggByAgg$Total
+
+g <- ggplot(aggByAgg, aes(x= Year))
+
+#g + geom_bar(aes(y = aggByAgg$Total),stat="identity") +ylab('total student debt')
+
+#g + geom_bar(aes(y = aggByAgg$value),stat="identity") +ylab('total GDP')
+
+meltdf <- aggByAgg %>% 
+  select(Year, percent_of_total, percent_of_total_youngsters, percent_of_total_midage, percent_of_total_lateage) %>% 
+  melt(id = "Year")
+
+#ggplot(meltdf,aes(x=Year,y=100*value,colour=variable,group=variable)) + geom_line() + ylab('Percentage') +scale_color_discrete(labels=c("Total Debt as Percentage of US GDP", "Percent of Total Debt by people Under 30", "Percent of Total Debt by people between 30 and 50","Percent of Total Debt by people older than 50"))
+
+```
+
+```{r, fig.height = 5, fig.width = 8, echo = FALSE}
+
+ggplot(aggByAgg, aes(x = factor(Year), y = Total, width = 0.5)) + 
+  geom_bar(stat = "identity", color = "black", fill = "darkseagreen1") +
+  scale_x_discrete(breaks = seq(2004, 2017, by = 1)) +
+  scale_y_continuous(limits = c(0, 1500), breaks = seq(0, 1500, by = 500)) +
+  xlab("Year") + 
+  ylab("Total Student Debt (USD in billion)") + 
+  labs(title = "Figure 1:    Total student debt by Year") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) +
+  theme(plot.title = element_text(face = "bold", size = 16))
+
+```
+
+
+```{r, fig.height = 5, fig.width = 8, echo = FALSE}
+
+ggplot(aggByAgg, aes(x = factor(Year), y = value, width = 0.5)) + 
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  scale_x_discrete(breaks = seq(2004, 2017, by = 1)) +
+  scale_y_continuous(limits = c(0, 20000), breaks = seq(0, 20000, by = 5000)) +
+  xlab("Year") + 
+  ylab("Total GDP (USD in billion)") + 
+  labs(title = "Figure 2:    Total GDP by Year") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) +
+  theme(plot.title = element_text(face = "bold", size = 16))
+
+```
+
+
+```{r, fig.height = 8, fig.width = 15, echo = FALSE}
+
+ggplot(meltdf, aes(x = Year, y = 100 * value, colour = variable)) + 
+  geom_line(size = 0.75) +
+  geom_point(size = 3) + 
+  ylab("Percentage") + 
+  labs(color = "\n") +
+  scale_color_discrete(labels = c("Total Debt as Percentage of US GDP", 
+                                  "Percent of Total Debt by people Under 30", 
+                                  "Percent of Total Debt by people between 30 and 50",
+                                  "Percent of Total Debt by people older than 50")) + 
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, by = 10)) +
+  scale_x_continuous(limits = c(2004, 2017), breaks = seq(2004, 2017, by = 1), labels = seq(2004, 2017, by = 1)) +
+  ggtitle("Figure 3    Debt percentage by Year") +
+  theme(legend.direction = "vertical", legend.position = "bottom", 
+        legend.text = element_text(size = 16)) + 
+  theme(axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 18, face = "bold")) +
+  theme(plot.title = element_text(face = "bold", size = 24))
+
+```
+
+
+
+## Amount of total Indebtness
+
+Here we look at the amount of debt by Total Indebtness bands - In particular we are interested in the number of people who carry heavy debt loads (>$100k), which could be unsustainable in a recession. 
+
+```{r pressure, echo = FALSE}
+
+# Number of people at various total indebtness levels 16Q4,17Q4
+numByTotalDebt <- read_csv('Num_By_TotalDebt_NYFED.csv',col_names = TRUE)
+
+# Total data from fed on number of people and aggregate debt levels per state and categories
+bothByStateTotalDebt <- read_csv('Both_By_State_TotalDebt_ED.csv',col_names = TRUE)
+
+# DF of only number of borrowers per category of total debt and state
+numByStateTotalDebt <- bothByStateTotalDebt %>% select("Location","Location" ,"5 numbers" ,"10 numbers","20 numbers","40 numbers",  "60 numbers"   ,"80 numbers","100 numbers","200 numbers","1000 numbers")
+
+# DF of aggregate debt per category of total debt and state
+aggByStateTotalDebt <- bothByStateTotalDebt %>% select("Location","Location" ,"5 dollars" ,"10 dollars","20 dollars","40 dollars",  "60 dollars"   ,"80 dollars","100 dollars","200 dollars","1000 dollars")
+
+                
+X <- data.frame( label = c("<5","<10","<100","<200",">200"))
+
+X$`16Q4` <- c( numByTotalDebt$`16Q4`[1] ,numByTotalDebt$`16Q4`[2], 
++ numByTotalDebt$`16Q4`[3] +numByTotalDebt$`16Q4`[4]+numByTotalDebt$`16Q4`[5] + numByTotalDebt$`16Q4`[6],numByTotalDebt$`16Q4`[7] +numByTotalDebt$`16Q4`[8],numByTotalDebt$`16Q4`[9])
+
+X$`17Q4` <- c( numByTotalDebt$`17Q4`[1] ,numByTotalDebt$`17Q4`[2], 
++ numByTotalDebt$`17Q4`[3] +numByTotalDebt$`17Q4`[4]+numByTotalDebt$`17Q4`[5] + numByTotalDebt$`17Q4`[6],numByTotalDebt$`17Q4`[7] +numByTotalDebt$`17Q4`[8],numByTotalDebt$`17Q4`[9])
+
+t18Q3 <- colSums(numByStateTotalDebt[,-1] )
+t18Q3 <- data.frame(colname = names(numByStateTotalDebt[,-1]),colSums_demo=colSums(numByStateTotalDebt[,-1]))
+
+X$`18Q3` <- 1000*c( t18Q3$colSums_demo[1] ,t18Q3$colSums_demo[2], 
++ t18Q3$colSums_demo[3]+ t18Q3$colSums_demo[4]+t18Q3$colSums_demo[5]+ t18Q3$colSums_demo[6]+t18Q3$colSums_demo[7],t18Q3$colSums_demo[8],t18Q3$colSums_demo[9])
+ 
+
+t18Q3 <- data.frame(colname = names(aggByStateTotalDebt[,-1]),colSums_demo=colSums(aggByStateTotalDebt[,-1]))
+X$Agg <- c( t18Q3$colSums_demo[1] ,t18Q3$colSums_demo[2], 
++ t18Q3$colSums_demo[3]+ t18Q3$colSums_demo[4]+t18Q3$colSums_demo[5]+ t18Q3$colSums_demo[6]+t18Q3$colSums_demo[7],t18Q3$colSums_demo[8],t18Q3$colSums_demo[9])
+
+X <- melt(X,id = 'label')
+
+X$label <- factor(X$label, levels=c("<5","<10","<100","<200",">200") )
+
+
+#ggplot() + geom_bar(data = X %>% filter(variable != "Agg"), stat = "identity",mapping = aes(x = label,y = value, fill = variable ),position = "dodge") + geom_bar(data = X %>% filter(variable == "Agg"), stat = "identity",mapping = aes(x = label,y = 30.5* 1e3 * value, fill = variable ),position = "dodge",alpha = 0.5) + scale_y_continuous(sec.axis = sec_axis(~.*0.0000000305, name = "Total $ Debt Level 18Q3 IN TRILLIONS")) + ylab("number of people")
+
+```
+
+
+```{r, fig.height = 5, fig.width = 10, echo = FALSE}
+
+X_new <- X %>%
+  mutate(value_new = ifelse((variable != "Agg"), value, 30.5 * 1e3 * value))
+
+
+par(mfrow = c(1, 1), las = 1, mar = c(2, 2, 2, 4))
+
+ggplot(X_new, aes(label, value_new, fill = variable, width = 0.75)) + 
+  geom_bar(stat = "identity", position = "dodge") +
+  #scale_y_continuous(limits = c(0, 30000000), 
+  #                   breaks = seq(0, 30000000, by = 10000000),
+  #                   sec.axis = sec_axis(~.*0.0000000305, 
+  #                                       name = "Total $ Debt Level 18Q3 IN TRILLIONS")) +
+  xlab("Indebetness") + 
+  ylab("Number of People") + 
+  ggtitle("Figure 4:    Number of People by Indebetness") +
+  theme(legend.direction = "vertical", legend.position = "right", 
+        legend.text = element_text(size = 9)) +
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 12)) +
+  theme(plot.title = element_text(face = "bold", size = 16))
+
+```
+
+
+```{r, echo = FALSE}
+
+total_num_people_with_debt <- (X %>% filter(variable == "18Q3") %>% group_by(variable) %>% summarize(s = sum(value)))$s
+
+average_debt_size <- (X %>% filter(variable == "Agg") %>% group_by(variable) %>% summarize(s = sum(value)))$s / total_num_people_with_debt
+
+total_num_people_with_debt_high <- (X %>% filter(variable == "18Q3",label %in% c("<100","<200",">200")) %>% group_by(variable) %>% summarize(s = sum(value)))$s
+
+average_debt_size_high <- (X %>% filter(variable == "Agg",label %in% c("<100","<200",">200")) %>% group_by(variable) %>% summarize(s = sum(value)))$s / total_num_people_with_debt_high
+
+```
+
+Interesting findings are that total debt is hevily concentrated in total amounts greater than $10k/person.  In particular they peak in the category of indebetness levels between $10k and $100k, where about $800bn of debt is distributed amongst 26 million borrowers.  
+
+```{r, fig.height = 15, fig.width = 12, echo = FALSE}
+
+# get Macro data by state
+# http://www.ukcpr.org/data
+covariates <- read_csv('Data-Table 1.csv',col_names = TRUE)
+covariates_small <- covariates[,1:14]
+covariates_small <- covariates_small[,c(-8,-9,-10,-12,-13)]
+
+covariate_by_state_2016 <- covariates_small %>% filter(year == 2016)
+#numByStateTotalDebt
+
+num <- numByStateTotalDebt %>% melt(id = "Location") %>% group_by(Location) %>% summarize(value = sum(value))
+
+agg <- aggByStateTotalDebt %>% melt(id = "Location") %>% group_by(Location) %>% summarize(value = sum(value))
+
+data <- inner_join(num,agg, by = "Location") %>% mutate(numbers = value.x, debt = value.y) %>% select("Location","numbers","debt")
+
+data$state_name <- state.abb[match(data$Location,state.name)]
+data$state_name[9] <- "DC"
+
+data <- data %>% inner_join(covariate_by_state_2016, by = "state_name") %>% mutate(GSP = .$'Gross State Product') %>% mutate(normalize_number = 1e5 * numbers/Population) %>%  mutate(normalize_debt = 1e5 * debt/GSP) %>% select("state_name","normalize_number","normalize_debt")
+
+#str(data)
+#head(data, n = 5)
+
+
+#ggplot(data,aes(color=normalize_number,x=normalize_debt,y=state_name))+geom_point() + ggtitle("Percentage of student debt in state as percent of GDP of the state")
+
+```
+
+
+```{r, fig.height = 15, fig.width = 12, echo = FALSE}
+
+theme_dotplot <- theme_bw(14) +
+  theme(axis.text.y = element_text(size = rel(.75)),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_text(size = rel(.75)),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(size = 0.5),
+        panel.grid.minor.x = element_blank())
+
+#ggplot(data, aes(x = normalize_debt, y = reorder(state_name, normalize_debt), color = factor(normalize_number))) +
+#  geom_point(size = 4) +
+#  theme_dotplot + 
+#  xlab("normalize_debt") +
+#  ylab("state_name") +
+#  ggtitle("Figure 5:    Percentage of student debt in state as percent of GDP of the state") +
+#  theme(legend.direction = "vertical", legend.position = "right", 
+#        legend.text = element_text(size = 9)) + 
+#  theme(axis.text.x = element_text(face = "bold", color = "black", size = 12),
+#        axis.text.y = element_text(face = "bold", color = "black", size = 12)) +
+#  theme(text = element_text(face = "bold", size = 16)) +
+#  theme(plot.title = element_text(face = "bold", size = 20))
+
+tidy_data <- data %>% mutate(State = reorder(state_name, normalize_debt)) %>% select(State, normalize_number,normalize_debt) %>% gather(measure, value, normalize_number,normalize_debt)
+
+ggplot(tidy_data, aes(x = value, y = State, color = factor(measure))) +
+  geom_point(size = 4) +
+  theme_dotplot + 
+  #xlab("normalize_debt") +
+  xlab("measure") +
+  ylab("state_name") +
+  ggtitle("Figure 5:    Percentage of student debt in state as percent of GDP of the state") +
+  theme(legend.direction = "vertical", legend.position = "right", 
+        legend.text = element_text(size = 9)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 12),
+        axis.text.y = element_text(face = "bold", color = "black", size = 12)) +
+  theme(text = element_text(face = "bold", size = 16)) +
+  theme(plot.title = element_text(face = "bold", size = 20))
+
+```
+
+
+```{r, fig.height = 10, fig.width = 10, echo = FALSE}
+
+#state.name
+
+debtByState <- data %>%
+  as.data.frame(select(state_name, normalize_debt)) %>%
+  mutate(states = tolower(abbr2state(state_name))) %>%
+  select(states, normalize_debt)
+
+colnames(debtByState) <- c("region", "value")
+
+
+state_choropleth(debtByState,
+                 title = "Figure 6:    Heatmap for percentage of student debt in state as percent of GDP of the state",
+                 num_colors = 7,
+                 legend = "Percent Debt")
+
+debtByState <- data %>%
+  as.data.frame(select(state_name, normalize_number)) %>%
+  mutate(states = tolower(abbr2state(state_name))) %>%
+  select(states, normalize_number)
+
+colnames(debtByState) <- c("region", "value")
+
+
+state_choropleth(debtByState,
+                 title = "Figure 7:    Heatmap for percentage of borrowers out of state total population",
+                 num_colors = 7,
+                 legend = "Percent Debt")
+
+
+```
+
+
+```{r, echo = FALSE}
+
+#trying ridge line of debt distribution by state
+
+library(ggridges)
+
+distData <- read_csv('adjBoth_By_State_TotalDebt_ED.csv',col_names = TRUE)
+
+distData <- distData %>%
+  gather(key, value, -Location) %>%
+  extract(key, c("question", "bin"), "(Q.\\..)\\.(.)") %>%
+  spread(question, value) %>% mutate(freq = Q1.1) %>% mutate(value = Q1.2) %>% select(Location, bin, freq, value)
+
+#ggplot(distData, aes(x = value, y = freq, group = factor(Location))) + 
+  #geom_density_ridges()
+
+#ggplot(data = distData %>% filter(Location %in% c("Alabama","Mississippi")),aes(x = value, y = freq,color = Location)) + geom_bar(stat = "identity", position = "dodge", alpha = 0.5) + ggtitle("attemp to make histogram of two states and their distribution of debt size", subtitle = "This needs to be normalized to state population and GDP and also needs to generate a quasi-distribution to show all states in a ridge line plot")
+
+```
+
+
+```{r, fig.height = 20, fig.width = 15, echo = FALSE}
+
+#head(distData, n = 10)
+
+distData_new <- distData %>%
+  filter(!is.na(Location))
+
+distData_new <- as.data.frame(distData_new)
+distData_new$Location <- as.factor(distData_new$Location)
+distData_new$bin <- as.factor(distData_new$bin)
+levels(distData_new$bin) <- c('1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th')
+
+#str(distData_new)
+#head(distData_new, n = 15)
+
+
+#require(gridExtra)
+
+state <- paste(distData_new$Location) 
+plot1 <- ggplot(distData_new, aes(x = value, y = Location)) +
+  geom_density_ridges(aes(fill = state), alpha = 0.5) +
+  scale_y_discrete(expand = c(0, 0)) +  
+  scale_x_continuous(expand = c(0, 0)) +
+  xlab("Average Loan Balance") +
+  ylab("State") +
+  ggtitle("Figure 8a: Distr of Average Loan Balance by state") +
+  theme_dotplot + 
+  theme(legend.direction = "horizontal", legend.position = "bottom", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 16),
+        axis.text.y = element_text(face = "bold", color = "black", size = 16)) +
+  theme(text = element_text(face = "bold", size = 36)) +
+  theme(plot.title = element_text(face = "bold", size = 28))
+plot1
+
+
+plot2 <- ggplot(distData_new, aes(x = freq, y = Location)) +
+  geom_density_ridges(aes(fill = state), alpha = 0.5) +
+  scale_y_discrete(expand = c(0, 0)) +  
+  scale_x_continuous(expand = c(0, 0)) +
+  xlab("Frequency") +
+  ylab("State") +
+  ggtitle("Figure 8b: Distr of Frequency by state") +
+  theme_dotplot + 
+  theme(legend.direction = "horizontal", legend.position = "bottom", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 16),
+        axis.text.y = element_text(face = "bold", color = "black", size = 16)) +
+  theme(text = element_text(face = "bold", size = 36)) +
+  theme(plot.title = element_text(face = "bold", size = 28))
+plot2
+
+#grid.arrange(plot1, plot2, ncol = 2)
+
+```
+
