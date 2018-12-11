@@ -1,0 +1,1530 @@
+---
+title: "EDAV Final Report"
+author: "Yadin Rozov, Kun Tao"
+date: "12/10/2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE, 
+                      cache = TRUE)
+library(truncnorm)
+library(ggridges)
+library(choroplethr)
+library(choroplethrZip)
+library(openintro)
+library(tidyverse)
+library(dplyr)
+library(reshape2)
+library(ggthemes)
+library(readxl)
+library(wbstats)
+library(ggplot2)
+library(lubridate)
+library(viridis)
+library(tidyr)
+library(ggrepel)
+library(RColorBrewer)
+library(knitr)
+library(kableExtra)
+library(GGally)
+library(plotly)
+
+
+options(scipen=999)
+```
+
+
+# Introduction
+
+The Federal Student Loan program is a key funding mechanism that individuals in the United States use to pursue higher education.  The program has reportedly grown quickly in the last decade and now outstanding student loan balances make up the biggest component of the Federal Government's balance sheet.  We attempt to look at data to get a better understanding of this program.  We decided to work on this project because we think there is limited public understanding of the magnitude of the program and how critical it will become for the financial future of the United States and the state of higher education.  
+
+We worked together on the project with Yadin Rozov doing more of the work on report and Kun Tao focusing on the interactive part.  
+
+Our approach was to start by asking the below questions about the topic and to start by analyzing basic variables first while building our data set and understanding as we progressed in complexity.  This worked well in particularly as it pertained to information about how the Federal Portfolio is distributed across the states and haw various variables relate to each other.
+
+Besides this Final Report, we have created a Repo for this project at GitHub to hold related datasets and Rmd files developed at different stage of our prject. The link to the Repo is: 
+
+https://github.com/KunData/EDAV_Final_Project
+
+
+## Questions:
+
+- How big is the market, how fast has it grown? how does size and growth compare to the size and growth of the economy/population in large?
+- How widely distributed is the debt? How does the distribution of Debt looks like across different individuals?
+- Can we identify regions of the country that have high student loan debt concentration?  are there any economic indicators that correlate with high student loan utilization in given geographies?
+- Who are the borrowers? Where are they from and how much debt do they have? What is the debt being used for?
+- Can we identify problematic loans?  Where are they concentrated and what can be their impact?  How does default rate look across the country and is this variable related to any economic indicators?
+- How has the performance of these loans been?  Is this a problem for the Federal Government?
+
+# Description of data
+
+We used direct data on the student loan market and data on economic indicators that we used to 'normalize' the student loan data to other indications of the economic and population.  
+
+1. Student Loan Data:
+    + US Department of Education - XLS spreadsheet with summary data across different cohorts.  https://studentaid.ed.gov/sa/about/data-center/student/portfolio and https://www2.ed.gov/offices/OSFAP/defaultmanagement/staterates.pdf converted to defaultRateByState2015.csv using https://pdftables.com/
+    + NY Federal Reserve - XLS spreadsheet updated annually with Aggregate data on the market.     https://www.newyorkfed.org/medialibrary/interactives/householdcredit/data/xls/sl_update_2018.xlsx
+    + Minnesota Office of Higher Education http://www.ohe.state.mn.us/pdf/stateTerritoryDefaultRates3yr.pdf converted to defaultRateByState2012.csv using https://pdftables.com/
+    
+2. Economic Indicators:
+    + University of Kentucky, Center for Poverty Research - XLS spreadsheet with collection of economic indicators by State
+.     http://ukcpr.org/resources/national-welfare-data
+
+3. State Educational Expenditures:
+    + State Higher Education Executive Officers Association (SHEEO) -- XLSX file that was created manually from a PDF file found here: http://www.sheeo.org/sites/default/files/project-files/SHEEO_SHEF_FY2017_FINAL.pdf
+    
+# Analysis of data quality
+  
+We attempted to reconcile the numbers where possible by ensuring that variables such as total debt by year and number of borrowers were consistent between the sources.  
+
+The main issue we faced was that for legal and privacy reasons it's impossible to access the actual Federal Loan Portfolio.  This means that while our primary data was provided by the Department of Education, we could only rely on summaries across a few variables at a time, with these variables typically binned (secondary data sources also provided summaries where they obtained access to the underlying data or generated their own) This means that we couldn't do extensive multi-variate analysis and had to develop an approach to extract helpful analysis from the summaries.  The good news is that our data was clean and we did not have to deal with NA's.  We discuss some of our specific approaches in the Main Analysis.  
+
+# Main Analysis
+
+### Market Size
+```{r, include=FALSE}
+
+# Download Overall Portfolio Data 
+
+
+url <- "https://studentaid.ed.gov/sa/sites/default/files/fsawg/datacenter/library/PortfolioSummary.xls"
+destfile <- "PortfolioSummary.xls"
+curl::curl_download(url, destfile)
+PortfolioSummary <- read_excel(destfile, 
+    skip = 5)
+#View(PortfolioSummary)
+PortfolioSummary$X__1[1:6] <- "Q4"
+library(zoo)
+PortfolioSummary$Year <- paste(na.locf(PortfolioSummary$`Federal Fiscal Year2`),PortfolioSummary$X__1)
+dataSet <- PortfolioSummary[1:29,c('Year',"Dollars Outstanding            (in billions)__1","Unduplicated Recipients    (in millions)")]
+dataSet$date <- as.Date( as.yearqtr( dataSet$Year) )
+
+library(quantmod)
+# Nominal GDP
+gdp = getSymbols('GDP',src='FRED', auto.assign=F) 
+gdp.df = data.frame(date=time(gdp), coredata(gdp) )
+# Working Age Individuals 
+pop = getSymbols('LFWA64TTUSQ647N',src='FRED', auto.assign=F) 
+pop.df = data.frame(date=time(pop), coredata(pop) )
+# Personal Income across US Economy
+income = getSymbols('PINCOME',src='FRED', auto.assign=F) 
+income.df = data.frame(date=time(income), coredata(income) )
+
+library(dplyr)
+df_merged <- inner_join(dataSet, gdp.df, by = 'date')
+df_merged <- inner_join(df_merged, pop.df, by = 'date')
+df_merged <- inner_join(df_merged, income.df, by = 'date')
+
+df_merged <- df_merged %>% mutate(Debt = `Dollars Outstanding            (in billions)__1`, Borrowers = `Unduplicated Recipients    (in millions)`,Population = LFWA64TTUSQ647N/1e6) %>% select(date,GDP,Debt,Borrowers,Population,PINCOME) %>% mutate( quarter = format(as.yearqtr(date),"Q%q")) %>% mutate( Debt_PINCOME = Debt/PINCOME * 100) %>% mutate( Borrowers_Pop = Borrowers/Population * 100)
+
+# adding normalized data column for GDP 
+df_merged <- df_merged %>% mutate(GDP_s = 516 * GDP/df_merged$GDP[1])
+
+
+# tidy dataframe
+tidy_df_merged <- df_merged %>% filter(quarter == "Q4") %>% gather(key = "indicator",value = "level",-date) %>% filter(indicator == c("Borrowers"))
+
+tidy_df_merged$level <- as.numeric(tidy_df_merged$level)
+
+# plot number of borrowers
+ggplot(tidy_df_merged , aes(x = date, y = level)) + 
+  geom_line(aes(color = indicator), size = 1) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800","coral3","khaki2","black")) +  xlab("year") + ylab("number of borrowers (in millions)") +   guides(color=FALSE) +
+  theme_minimal() + ggtitle("Plot of Number of Borrowers by year", subtitle = "Annual Data.  2008-2017 (2018 Q4 not published yet)")
+
+
+tidy_df_merged <- df_merged %>% filter(quarter == "Q4") %>% gather(key = "indicator",value = "level",-date) %>% filter(indicator == "Debt") # | indicator == "GDP_s")
+
+tidy_df_merged$level <- as.numeric(tidy_df_merged$level)
+
+# plot aggregate Debt
+ggplot(tidy_df_merged , aes(x = date, y = level)) + 
+  geom_line(aes(color = indicator), size = 1) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800","coral3","khaki2","black")) + xlab("year") + ylab("amount of debt (in $ billions)") +   guides(color=FALSE) +
+  theme_minimal() + ggtitle("Plot of Aggregate Federal Student Loan Debt by year", subtitle = "Annual Data.  2008-2017 (2018 Q4 not published yet)")
+
+
+
+tidy_df_merged <- df_merged %>% filter(quarter == "Q4") %>% gather(key = "indicator",value = "level",-date) %>% filter(indicator == "Debt_PINCOME" | indicator == "Borrowers_Pop")
+
+
+tidy_df_merged$level <- as.numeric(tidy_df_merged$level)
+
+# plot aggregate Debt
+ggplot(tidy_df_merged , aes(x = date, y = level)) + 
+  geom_line(aes(color = indicator), size = 1) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800","coral3","khaki2","black")) + xlab("year") + ylab("Percent") +
+  theme_minimal() + ggtitle("Plot of Relative Growth in Debt", subtitle = "Annual Data.  2008-2017 (2018 Q4 not published yet)")
+
+  
+```
+
+We first looked at the aggregated data from the New York Fed in file 'sl_update_2018.xlsx' This spreadsheet includes multiple tabs of aggregated data that the Fed obtained from the underlying data of the Department of Education.  We used the two tables that summarize the amount of debt and number of borrowers by year.  The data the Fed provides is annual data from 2003 to 2017.  We combined it with data from Q3 of 2018, which we obtained directly from a Department of Education most recently published portfolio summary.   
+
+We used this data to first look at the amount of debt and number of borrowers every year since 2003.  We chose to use bar charts to illustrate the annual numbers (and not give impression our data was more granular like would have been the case had we used geom_line) for both variables.  The  next two graphs show that there's been a 5.5x increase in the amount of debt since 2003 (almost 12.5% per-anum growth rate) and a 2.5x increase in the number of people with student loan debt.  
+
+
+```{r}
+
+# downloading data from New York Fed
+url <- "https://www.newyorkfed.org/medialibrary/interactives/householdcredit/data/xls/sl_update_2018.xlsx"
+destfile <- "sl_update_2018.xlsx"
+curl::curl_download(url, destfile)
+SL_data_repayment_status_balance <- read_excel(destfile, sheet = 'data_repayment_status_balance',
+    skip = 4)
+plot_data <- tibble(year = SL_data_repayment_status_balance$X__1, debt = SL_data_repayment_status_balance$Total)
+
+plot_data[16,1] <- 2018
+plot_data[16,2] <- df_merged$Debt[length(df_merged$Debt)]
+
+# way to calculate rate of change of debt
+#plot_data %>% mutate(rate = 100 * (debt - lag(debt))/lag(debt)) %>% filter(year > 2003)
+
+ggplot(plot_data, aes(x = factor(year), y = debt, width = 0.5)) + 
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  scale_x_discrete(breaks = seq(2003, 2018, by = 1)) +
+  scale_y_continuous(limits = c(0, 1600), breaks = seq(0, 1600, by = 500)) +
+  xlab("Year") + 
+  ylab("Total Student Debt (USD in billion)") + 
+  labs(title = "How much Federal Student Debt is there in the United States?",subtitle="...Over $1.4 Trillion in Aggregate and it's grown more than 5.5x since 2003", caption = "Source: NY Federal Reserve, Federal Student Aid") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) + theme_classic() +
+  geom_label(aes(x=16,y = 1535,label = "$1414 bn \n as of 18Q3"),size=2,fill="lightgrey",hjust="inward") + 
+  geom_label(aes(x=1,y = 450,label = "$253 bn \n in 2003"),size=2,fill="lightgrey")
+ # theme(plot.title = element_text(face = "bold", size = 14)) + annotate("text", label = 'bold("$1414 bn \n as of Q3")',x=16,y = 1510, size = 3,parse = TRUE)+
+#annotate("text", label = 'bold("$253 bn \n in 2003")',x=1,y = 450, size = 3,parse = TRUE)
+
+# downloading data from New York Fed
+url <- "https://www.newyorkfed.org/medialibrary/interactives/householdcredit/data/xls/sl_update_2018.xlsx"
+destfile <- "sl_update_2018.xlsx"
+curl::curl_download(url, destfile)
+SL_data_repayment_status_number <- read_excel(destfile, sheet = 'data_repayment_status_number',
+    skip = 3)
+plot_data_2 <- tibble(year = SL_data_repayment_status_number$X__1, number = SL_data_repayment_status_number$Total)
+
+plot_data_2[16,1] <- 2018
+plot_data_2[16,2] <- 44.2
+
+
+ggplot(plot_data_2, aes(x = factor(year), y = number, width = 0.5)) + 
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  scale_x_discrete(breaks = seq(2003, 2018, by = 1)) +
+  scale_y_continuous(limits = c(0, 55), breaks = seq(0, 55, by = 5)) +
+  xlab("Year") + 
+  ylab("Total Number of Borrowers (million)") + 
+  labs(title = "How many people have Federal Student Loan debt in the United States?",subtitle="...Over 44.2 million peopls and the number has grown almost 2.5x since 2003", caption = "Source: NY Federal Reserve, Federal Student Aid") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) + theme_classic() +
+  geom_label(aes(x=16,y = 50,label = "44.2mm \n as of 18Q3"),size=2,fill="lightgrey",hjust="inward") + 
+  geom_label(aes(x=1,y = 25,label = "18.3mm \n in 2003"),size=2,fill="lightgrey")
+ # theme(plot.title = element_text(face = "bold", size = 14)) + annotate("text", label = 'bold("$1414 bn \n as of Q3")',x=16,y = 1510, size = 3,parse = TRUE)+
+#annotate("text", label = 'bold("$253 bn \n in 2003")',x=1,y = 450, size = 3,parse = TRUE)
+
+
+```
+
+Next we wanted to see how these numbers compare to the growth in relevant economic indicators.  We used API from the 'quantmod' library to download economic data from the St. Louis Federal Reserve.  Specifically we downloaded quarterly Nominal GDP, Aggregate Personal Income and Working Age Population (count of all individuals ages 15-64) for the entire country.  We looked at the aggregated debt amount divided by both GDP and Personal Income and then looked at the number of borrowers divided by the size of the working population in the country.  We also looked at the annual percentage changes to these variables.  It is clear from the graphs that the growth in debt (amount and number of borrowers) has far exceeded growth in the economy, as reflected in GDP, Income, and population.  Interestingly, however, the growth in all of these is appearing to slow since 2003 and in particular there is no growth in the relative number of borrowers.   Can we explain the trends since 2013 and in particular the lack of growth in the number of borrowers relative to the amount of debt (suggesting that average debt per borrower has grown since 2013)?
+
+```{r}
+plot_data_4 <- income.df %>% mutate(year = year(date)) %>% filter( (month(date) == 10 & year(date) >= "2003") | (month(date) == 7 & year(date) >= "2018"))  %>%  select(year, PINCOME) %>% inner_join(plot_data) %>% mutate(debt_income = 100*debt/PINCOME)
+
+plot_data_4 <- gdp.df %>% mutate(year = year(date)) %>% filter( (month(date) == 10 & year(date) >= "2003") | (month(date) == 7 & year(date) >= "2018"))  %>%  select(year, GDP) %>% inner_join(plot_data_4) %>% mutate(debt_GDP = 100*debt/GDP) %>% select(year,debt_income,debt_GDP) %>% gather( key,value,-year)
+
+ggplot(plot_data_4, aes(x = factor(year), y = value, fill = key, width = 0.5)) + 
+  geom_bar(stat = "identity", position = "dodge",color = "black") +
+  scale_x_discrete(breaks = seq(2003, 2018, by = 2)) +
+  scale_y_continuous(limits = c(0, 10), breaks = seq(0, 10, by = 2)) +
+  xlab("Year") + 
+  ylab("Total Debt/Total Income (percent)") + 
+  labs(title = "How has the growth in total student debt been tracking growth in the economy?",subtitle="...Not well.  Student Debt as percent of Personal Income and GDP has gone up more 3x", caption = "Source: NY Federal Reserve, Federal Student Aid\n*2018 data as of end of Q3") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) + theme_classic() +
+  scale_fill_manual(labels = c("Percent of GDP", "Percent of \nPersonal Income"), values = c("blue", "lightblue")) +
+  geom_label(aes(x=15,y = 10,label = "By 2017 over 8.1% of Personal Income and 7% of GDP"),size=2,fill="lightgrey",hjust="inward",vjust="inward") + 
+  geom_label(aes(x=1,y = 4,label = "In 2003 only 2.6% of Personal  Income and \n 2.14% of GDP"),size=2,fill="lightgrey",hjust="inward",vjust = "inward")
+
+plot_data_2$year <- as.numeric(plot_data_2$year)
+plot_data_5 <- pop.df %>% mutate(year = year(date)) %>% filter( (month(date) == 10 & year(date) >= "2003") | (month(date) == 7 & year(date) >= "2018"))  %>% select(year, LFWA64TTUSQ647N) %>% inner_join(plot_data_2) %>% mutate(borrowers_total = 100000000*number/LFWA64TTUSQ647N) 
+plot_data_5$period <- ifelse(plot_data_5$year < 2013, 1, 2)
+
+ggplot(plot_data_5, aes( x = year,color = factor(period),y = borrowers_total, width = 0.5)) + 
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  geom_point() +
+  geom_smooth(se = FALSE, method = lm) +
+  #scale_x_discrete(breaks = seq(2003, 2018, by = 1)) +
+  scale_x_continuous(limits = c(2002.5,2018.5), breaks = seq(2003, 2018, by = 1)) +
+  scale_y_continuous(limits = c(0, 25), breaks = seq(0, 25, by = 5)) +
+  xlab("Year") + 
+  ylab("Percentage total US working age population with student debt") + 
+  labs(title = "How has the number of borrowers tracked the population growth?",subtitle="...While the percentage of borrowers out of working age adult doubled from 2003 to 2013, \nit has remained fairly stable since...", caption = "Source: NY Federal Reserve, Federal Student Aid\n*2018 data as of end of Q3") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) + theme_classic() +  guides(color=FALSE) +
+  geom_label(aes(x=2005,y = 20,label = "From 2003 to 2013\nApproximately 8% growth rate a year"),size=2,fill="lightgrey") + 
+  geom_label(aes(x=2016,y = 25,label = "From 2013 to 2018\nApproximately 0% growth rate a year"),size=2,fill="lightgrey")
+
+growth <- plot_data_5 %>% mutate(borrowers_total = 100 * (borrowers_total - lag(borrowers_total))/lag(borrowers_total)) %>% filter(year > 2003)
+
+ggplot(growth, aes( x = year,color = factor(period),y = borrowers_total, width = 0.5)) + 
+  geom_point(stat = "identity", color = "black", fill = "lightblue") +
+  #scale_x_discrete(breaks = seq(2004, 2018, by = 1)) +
+  scale_x_continuous(limits = c(2004.5,2018.5), breaks = seq(2005, 2018, by = 1)) +
+  scale_y_continuous(limits = c(-5, 15), breaks = seq(-5, 15, by = 5)) +
+  xlab("Year") + 
+  ylab("Annutal Change (Percent)") + 
+  labs(title = "How does the growth in the percentage of borrowers out of working age adult looked?",subtitle="...While the percentage of borrowers out of working age adult doubled from 2003 to 2013, \nit has remained fairly stable since...", caption = "Source: NY Federal Reserve, Federal Student Aid\n*2018 data as of end of Q3") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 14)) + theme_minimal() +  guides(color=FALSE) +
+  geom_label(aes(x=2008,y = 15,label = "From 2003 to 2013\n8% mean growth rate a year"),size=2,fill="lightgrey") + 
+  geom_label(aes(x=2016,y = 15,label = "From 2013 to 2018\n0% mean growth rate a year"),size=2,fill="lightgrey")
+
+#mean((growth %>% filter(year < 2014 & year > 2004))$borrowers_total)
+#mean((growth %>% filter(year > 2013))$borrowers_total)
+```
+
+### Distribution of Debt per Borrower
+
+We next wanted to look at how the amount of debt across the country is distributed across borrowers.  The Department of Education provides a summary break down of the amount of debt, and number of borrowers, for different bin sizes in 'Portfolio-by-Debt-Size.xls'  which we downloaded.  The data is quarterly from 2017.  The bins aggregate the total amount of debt, and number of borrowers with total debt under $5k, from $5k to $10k, from $10k to $20k, from $20k to $40k, from $40 to $80, from $100-200, and finally great than $200k.  A sample of this data is shown in 'Table 1'.
+
+```{r}
+url <- "https://studentaid.ed.gov/sa/sites/default/files/fsawg/datacenter/library/Portfolio-by-Debt-Size.xls"
+destfile <- "Portfolio-by-Debt-Size.xls"
+curl::curl_download(url, destfile)
+Portfolio_by_Debt_Size <- read_excel(destfile, 
+    skip = 4)
+
+temp_Portfolio_by_Debt_Size <- Portfolio_by_Debt_Size[2:7,]
+colnames(temp_Portfolio_by_Debt_Size) <- Portfolio_by_Debt_Size[1,]
+temp_Portfolio_by_Debt_Size <- as.data.frame(temp_Portfolio_by_Debt_Size)
+temp_Portfolio_by_Debt_Size[,3:20] <- sapply(temp_Portfolio_by_Debt_Size[,3:20],as.numeric)
+#temp_Portfolio_by_Debt_Size[2:7,3:20] <- as.numeric(temp_Portfolio_by_Debt_Size[2:7,3:20])
+
+kable(temp_Portfolio_by_Debt_Size[,1:10],digits = rep(2,20),booktabs = "T",caption = "Table 1: Sample of 'Portfolio-by-Debt-Size.xls'") %>% 
+  kable_styling(latex_options = c("striped","hold_position"),bootstrap_options = c("striped", "hold_position")) %>%
+  column_spec(1:10,"2em") %>%
+add_header_above(c(" " = 2, "Less than 5K" = 2, "5K to 10K" = 2, "10K to 20K" = 2, "20K to 40K" = 2))
+
+```
+Notice that bins sizes in 'Table 1' roughly double and that except for the mean debt per borrower per bucket, we don't get any other information on the debt distribution in the bins.  The fact that the data came in this format and the bins sizes appear to grow exponentially made use think that the distribution shape is important.  We spent a lot of time thinking about this data and trying to think of a method to estimate the distribution to be able to calculate meaningful summary statistics (i.e. median and quantiles).  We wrote a function ('generate_distribution') that uses for every bucket a Truncated Normal distribution with mean equal to the observed mean and sample size equal to the number of borrowers.  The truncated normal is bounded at the bin sizes and so our method ensured that we got an 'estimated' debt distribution sample that matched the data.  This method then allowed us to plot the distribution of debt for 2017 and 2018, look for difference and to calculate estimates for the median debt and quantiles.    
+
+```{r}
+
+data_18Q3 <- Portfolio_by_Debt_Size[7,]
+data_17Q3 <- Portfolio_by_Debt_Size[3,]
+
+generate_distribution <- function(data,err_mul){
+  lower <- c(0,5,10,20,40,60,80,100,200)
+  upper <- c(5,10,20,40,60,80,100,200,Inf)
+  
+  
+  data[3:20] <-as.numeric(data[3:20])
+  mean <- array(1:9)
+  size <- array(1:9)
+  total_size <- 0.0
+  for (i in 1:9){
+    mean[i] <- as.numeric(data[1+2*i] / data[2+2*i] )
+    size[i] <- round(as.numeric(10*data[2+2*i]))
+    total_size <- total_size + size[i]
+  }
+  sample <- array(1:total_size)
+  count <- 1
+  for (i in 1:9){
+    sample[count:(count+size[i]-1)] <- rtruncnorm(size[i], a=lower[i], b=upper[i], mean = mean[i], sd = mean[i]*err_mul) 
+    sample[count:(count+size[i]-1)] <- sample[count:(count+size[i]-1)] - mean(sample[count:(count+size[i]-1)]) + mean[i]
+    count <- count + size[i]
+    
+   
+  }
+  return(sample)
+}
+
+X <- generate_distribution(data_18Q3,1.0)
+X <- data.frame( sample = X)
+X$year <- 2018
+Y <- generate_distribution(data_17Q3,1.0)
+Y <- data.frame(sample = Y)
+Y$year <- 2017
+dat <- rbind(X,Y)
+
+ggplot(dat, aes(x=sample,color=factor(year),fill=factor(year))) + 
+    geom_histogram(aes(y=..density..)) + geom_density(alpha=.2) + ggtitle('Estimated Debt Distribution for 2017 and 2018')
+  
+ggplot(dat, aes(x=log2(sample),color=factor(year),fill=factor(year))) + 
+     geom_density(alpha=.2) + ggtitle('Estimated Log2 Density Debt Distribution for 2017 and 2018')
+
+ggplot(dat, aes(x=factor(year), y=log2(sample))) +ggtitle('Estimated Boxplot Debt Distribution for 2017 and 2018') +
+  geom_boxplot(notch=TRUE)
+
+#summary(dat %>% filter(year == 17))
+summary((dat %>% filter(year == 2017))$sample)
+summary((dat %>% filter(year == 2018))$sample)
+
+#quantile((dat %>% filter(year == 17))$sample)
+
+#PortfolioSummary
+
+```
+
+Notice in the above graphs, the distribution shape is shown best in a logarithmic scale and that while the mean debt grown from $30.3k to $31.7k per borrower, the distributions of debt looks similar and the difference can only be seen in the (logarithmic) boxplot where there's a slight shift in the location of the 1st and 3rd quantiles and median.
+
+### Distribution of Debt per Borrower per State
+
+Next we tried to look at breakdown of the student debt across the various states.  We loaded "Portfolio_by_Location_by_Debt_size.xls" from the Department of Education which provided a breakdown of debt, by bins similar to the previous section, by state. We used a similar 'generate_distribution_2' function to generate distribution a debt sizes as we did in the previous section.  Note that for every state the sample size, one data point represented 100,000 people so the distribution of larger states had naturally more data, which is something we didn't have time to analyze.  We first look at a ridge-line plot of the estimated distribution of debt and then used a log scale.  
+
+
+```{r}
+
+url <- "https://studentaid.ed.gov/sa/sites/default/files/fsawg/datacenter/library/Portfolio-by-Location-by-Debt-Size.xls"
+destfile <- "Portfolio-by-Location-by-Debt-Size.xls"
+curl::curl_download(url, destfile)
+Portfolio_by_Location_by_Debt_size <- read_excel(destfile, 
+    skip = 5)
+
+url <- "https://studentaid.ed.gov/sa/sites/default/files/fsawg/datacenter/library/Portfolio-by-Location-by-Age.xls"
+destfile <- "Portfolio-by-Location-by-Age.xls"
+curl::curl_download(url, destfile)
+Portfolio_by_Location_by_Age <- read_excel(destfile, 
+    skip = 5)
+
+generate_distribution_2 <- function(data,err_mul){
+  lower <- c(0,5,10,20,40,60,80,100,200)
+  upper <- c(5,10,20,40,60,80,100,200,Inf)
+  data[2:19] <-as.numeric(data[2:19])
+  mean <- array(1:9)
+  size <- array(1:9)
+  total_size <- 0.0
+  for (i in 1:9){
+    mean[i] <- 1000000*as.numeric(data[2*i] / data[1+2*i] )
+    size[i] <- round(as.numeric(10*data[1+2*i]))
+    total_size <- total_size + size[i]
+  }
+  sample <- array(1:total_size)
+  count <- 1
+  for (i in 1:9){
+    sample[count:(count+size[i]-1)] <- rtruncnorm(size[i], a=lower[i]*1000, b=upper[i]*1000, mean = mean[i], sd = mean[i]*err_mul) 
+    sample[count:(count+size[i]-1)] <- sample[count:(count+size[i]-1)] - mean(sample[count:(count+size[i]-1)]) + mean[i]
+    count <- count + size[i]
+    
+  }
+  
+
+  return(sample)
+}
+
+```
+
+```{r, fig.height = 20, fig.width = 15}
+
+theme_dotplot <- theme_bw(14) +
+  theme(axis.text.y = element_text(size = rel(.75)),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_text(size = rel(.75)),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(size = 0.5),
+        panel.grid.minor.x = element_blank())
+
+# GENERATE RIDGE PLOT OF EACH DEBT PER PERSON BY STATE
+
+# First generate debt samples per state to match the data
+# Second generate quantiles of debt levels
+Debt_distr_by_state <- vector("list", nrow(Portfolio_by_Location_by_Debt_size)-1)
+
+#colnames(Debt_distr_by_state_sum) <- c("Min. 1st Qu.  Median    Mean 3rd Qu.    Max.)
+population <- 1:(nrow(Portfolio_by_Location_by_Debt_size)-1)
+for (row in 2:nrow(Portfolio_by_Location_by_Debt_size)) {
+    data_state <- Portfolio_by_Location_by_Debt_size[row, ]
+    Debt_distr_by_state[[row-1]] <- generate_distribution_2(data_state,1)
+    population[row-1] <- length(Debt_distr_by_state[[row-1]])/10
+}
+
+Debt_distr_by_state_sum <- t(do.call(cbind, lapply(Debt_distr_by_state, summary)))
+
+df <- as.data.frame(Debt_distr_by_state_sum)
+df$"Numbers of Students" <- population
+temp <- Portfolio_by_Location_by_Debt_size %>% mutate( Location = X__1) %>% filter(Location != "Location") %>% select(Location)
+df$Location <- temp$Location
+new_df <- df[order(df$Median),] #ORDERing
+
+#mean(df$Median)
+#df$Location[which.min(df$Median)]
+
+
+tidy_Debt_distr_by_state <-  tibble( Location = factor(), Debt = double())
+
+for (row in 2:nrow(Portfolio_by_Location_by_Debt_size)) {
+    #Portfolio_by_Location_by_Debt_size[row, 1]
+    #Debt_distr_by_state[[row-1]] 
+    tidy_Debt_distr_by_state <- add_row(tidy_Debt_distr_by_state, Location = rep(as.character(Portfolio_by_Location_by_Debt_size[row, "X__1"]), times = length(Debt_distr_by_state[[row-1]])), Debt = Debt_distr_by_state[[row-1]])
+}
+
+
+
+#df$Location[which.max(df$Median)]
+
+state <- paste(tidy_Debt_distr_by_state$Location) 
+#levels(factor(tidy_Debt_distr_by_state$Location)) <- rank(df$Median)
+#tidy_Debt_distr_by_state$Location <- factor(tidy_Debt_distr_by_state$Location,levels = rank(df$Median))
+plot1 <- ggplot(tidy_Debt_distr_by_state, aes(x = Debt, y = Location)) +
+  geom_density_ridges(aes(fill = state), alpha = 0.2) +
+  scale_y_discrete(expand = c(0, 0)) +  
+  scale_x_continuous(limits = c(0, 150000)) +
+  #scale_x_continuous(expand = c(0, 0)) +
+  xlab("Loan Balance (Dollars)") +
+  ylab("State") +
+  ggtitle("Distribution of Loan Balance per Borrower by state") +
+  theme_dotplot + 
+  theme(legend.direction = "horizontal", legend.position = "none", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 16),
+        axis.text.y = element_text(face = "bold", color = "black", size = 16)) +
+  theme(text = element_text(face = "bold", size = 36)) +
+  theme(plot.title = element_text(face = "bold", size = 28))
+plot1
+
+plot1 <- ggplot(tidy_Debt_distr_by_state, aes(x = log2(Debt), y = Location)) +
+  geom_density_ridges(aes(fill = state), alpha = 0.2) +
+  scale_y_discrete(expand = c(0, 0)) +  
+  scale_x_continuous(limits = c(9, 19)) +
+  #scale_x_continuous(expand = c(0, 0)) +
+  xlab("Log2 Loan Balance (Dollars)") +
+  ylab("State") +
+  ggtitle("Distribution (Log) of Loan Balance per Borrower by state") +
+  theme_dotplot + 
+  theme(legend.direction = "horizontal", legend.position = "none", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 16),
+        axis.text.y = element_text(face = "bold", color = "black", size = 16)) +
+  theme(text = element_text(face = "bold", size = 36)) +
+  theme(plot.title = element_text(face = "bold", size = 28))
+plot1
+
+
+
+
+```
+
+As seen above, the distributions all have very extensive tails that can only be seen by using logarithmic scales (even when we used limited x-scale of $100k, the debt range goes up to $400k), they all look similar in shape and only a few exceptions stand out.  In particular, it is of note, that Puerto Rico stands out as having a distribution that is shifted to the left and that D.C. has a distribution that is shifted to the right.  Next, we note that the 'Not Reported' category, is large (see Table 2) and skewed to the left, which could impact our results as if these data points were accurately captured across the states they would have possibly pushed the distributions to the left.  We note the distributions are not entirely 'smooth', which is an artifact of our method of generating them.  
+
+```{r}
+dt <- tidy_Debt_distr_by_state %>%  group_by(Location) %>% summarise(Borrowers = n()/10) %>% mutate("Percent of Total" = 100* Borrowers/sum(Borrowers))  %>% filter(Location == "California" | Location == "Other"| Location == "Not Reported" | Location == "Puerto Rico")
+
+kable(dt,digits = rep(2,20),booktabs = "T",caption = "Table 2: Sample sizes for largest, smallest state and for 'Other' and 'Not Reported' (in millions)") %>% 
+  kable_styling(latex_options = c("striped","hold_position")) 
+
+```
+We next looked at the statistics we were able to calculate from the estimated distributions plotted above.  We used a Cleveland dot plot sorted by the mean, median and 1st and 3rd quantile debt per state and presented the graph sorted by the mean debt.  
+
+```{r, fig.height = 20, fig.width = 15}
+
+tidy_data <- df %>% mutate(State = reorder(Location, Mean)) %>% select(State, Mean,Median,"1st Qu.","3rd Qu.") %>% filter(State != "Not Reported" & State != "Other") %>% gather(measure, value, -State)
+
+ggplot(tidy_data, aes(x = value, y = State, color = factor(measure))) +
+  geom_point(size = 4) +
+  theme_dotplot + 
+  #xlab("normalize_debt") +
+  xlab("Debt") +
+  ylab("State") +
+  ggtitle("Nominal Student Debt Statistics by State (sorted by mean debt level per borrower)") + 
+  theme(legend.direction = "vertical", legend.position = "right", 
+        legend.text = element_text(size = 9)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 12),
+        axis.text.y = element_text(face = "bold", color = "black", size = 12)) +
+  theme(text = element_text(face = "bold", size = 16)) +
+  theme(plot.title = element_text(face = "bold", size = 20))
+
+
+```
+We noted in the above graph that similar to our conclusion from the earlier graph, Puerto Rico and DC stand out as having the highest and lowest mean (and distribution of debt) across all the categories reported.  This suggests that potentially there's an economic effect that is not being captures in that the economy of Puerto Rico is small while DC (per capita) could be relatively affluent.  We next looked at the same graph but with data that was standardize by Personal Income per Capita.  We obtained this data by downloading the state by state economic indicators from the University of Kentucky Center for Poverty.  
+
+```{r, fig.height = 20, fig.width = 15}
+# get Macro data by state
+# http://www.ukcpr.org/data
+url <- "http://ukcpr.org/sites/ukcpr/files/UKCPR_National_Welfare_Data_Update_111218.xlsx"
+destfile <- "UKCPR_National_Welfare_Data_Update_111218.xlsx"
+curl::curl_download(url, destfile)
+covariates <- read_excel(destfile, sheet = "Data",col_names = TRUE)
+
+covariates_small <- covariates[,1:14]
+covariates_small <- covariates_small[,c(-8,-9,-10,-12,-13)]
+
+covariate_by_state_2016 <- covariates_small %>% filter(year == 2016)
+covariate_by_state_2016$`Personal income per capita` <- covariate_by_state_2016$`Personal income`/ covariate_by_state_2016$Population
+
+df$state_name <- state.abb[match(df$Location,state.name)]
+df$region <- state.region[match(df$Location,state.name)]
+df$division <- state.division[match(df$Location,state.name)]
+df$state_name[9] <- "DC"
+
+df <- df %>% inner_join(covariate_by_state_2016, by = "state_name") %>% mutate(PPP = .$`Personal income per capita`) %>%  mutate("Income Normalized Mean Debt" = 0.001* Mean/PPP) %>% mutate("Income Normalized Median Debt" = 0.001* Median/PPP) %>% mutate("Income Normalized 3rd Qu. Debt" = 0.001* .$`3rd Qu.`/PPP) %>% mutate("Income Normalized 1st Qu. Debt" = 0.001* .$`1st Qu.`/PPP)
+
+
+
+tidy_data <- df %>% mutate(State = reorder(Location, .$`Income Normalized Mean Debt`)) %>% select(State, "Income Normalized Mean Debt","Income Normalized Median Debt","Income Normalized 1st Qu. Debt","Income Normalized 3rd Qu. Debt") %>% filter(State != "Not Reported" & State != "Other") %>% gather(measure, value, -State)
+
+ggplot(tidy_data, aes(x = value, y = State, color = factor(measure))) +
+  geom_point(size = 4) +
+  theme_dotplot + 
+  #xlab("normalize_debt") +
+  xlab("Debt as Multiple of Income") +
+  ylab("State") +
+  ggtitle("Income Normalized Student Debt Statistics by State (sorted by mean debt level per borrower") +
+  theme(legend.direction = "vertical", legend.position = "right", 
+        legend.text = element_text(size = 9)) + 
+  theme(axis.text.x = element_text(face = "bold", color = "black", size = 12),
+        axis.text.y = element_text(face = "bold", color = "black", size = 12)) +
+  theme(text = element_text(face = "bold", size = 16)) +
+  theme(plot.title = element_text(face = "bold", size = 20))
+```
+
+The results above showed that both PR, DC and Maryland, were no longer at the extreme ends of the graph.  The former was due to the fact that our data set did not include economic data on PR and unfortunately the island had to be taken out of the analysis.  The later, once normalized for income, moved from to the middle of the pack -- it appears that the high absolute debt load in DC, and Maryland, is potentially offset by the high income that some of the debt carriers have.  The new extremes high and low debt states were respectively Mississippi and Georgia and Connecticut and Massachusetts.
+
+We next explored if a geographical pattern existed that can be seen by looking at the Mean Debt divided by Average Personal Income and Number of Borrowers divided by state population on a Choropleth graph.  We used four bins to see if regions that have a particularly high concentration of debt or borrowers as percentage of state population could be easily identified.
+
+```{r, fig.height = 6, fig.width = 10}
+debtByState <- df %>%
+  #select(.$state_name, .$`Income Normalized Mean Debt`) %>%
+  mutate(states = tolower(abbr2state(state_name))) %>%
+  select(states, `Income Normalized Mean Debt`)
+
+colnames(debtByState) <- c("region", "value")
+
+col.pal <- brewer.pal(4, "Oranges")
+state_choropleth(debtByState,
+                 title = "Percentage of student debt in state as percent of mean personal income by state",
+                 num_colors = 4, 
+                 legend = "Debt as Multiple of Income")
+
+df$"Percentage of Population with Student Debt" <- 100000* df$`Numbers of Students`/df$Population
+
+borrowersByState <- df %>%
+  #select(.$state_name, .$`Income Normalized Mean Debt`) %>%
+  mutate(states = tolower(abbr2state(state_name))) %>%
+  select(states, "Percentage of Population with Student Debt")
+
+colnames(borrowersByState) <- c("region", "value")
+
+col.pal <- brewer.pal(4, "Greens")
+state_choropleth(borrowersByState,
+                 title = "Percentage of student borrowers out of State Population",
+                 num_colors = 4, 
+                 legend = "Percent of State Population\nWith Student Debt")
+
+
+
+```
+
+The maps revealed an interesting pattern that was not clear from the distributions or the Cleveland bar charts, mainly that the states with high debt load tend to be from the South, in fact old south (i.e. confederate states), which we hoped to explain with additional variables later.  
+
+There was no clear pattern for the number of borrowers as a percentage of state population and perhaps looking at the age demographics of the borrowers would have help us understand that dynamic better.
+
+### Age Demographics of Borrowers
+
+We next looked at age demographic data from the New York Fed summary data described earlier.  Annual data is provided from 2004 to 2017 of the breakdown for both amount of debt and number of borrowers into five age groups: under 30, 30 to 39, 40 to 49, 50 to 59 and older than 60 years old.  
+
+We downloaded nominal GDP data from the World Bank (which matched the data used earlier from FRED) to normalize the debt levels to GDP and looked at the data in stacked percentage bar plot.  We next attempted to consolidate the data into 'generations' using 'under 30' to represent the current Millennials, '30-50' to represent 'Gen-X' and 'Over 50' to represent the 'Baby-boomers'
+
+```{r}
+
+aggByAgg <- read_csv('Agg_By_Age_NYFED.csv',col_names = TRUE)
+destfile <- "sl_update_2018.xlsx"
+aggByAgg <- read_excel(destfile, sheet = 'data_agg_balances_by_age',
+    skip = 3,col_names = TRUE)
+
+aggByAgg <- aggByAgg[-c(15,16),]
+aggByAgg <- aggByAgg[,-c(7,8)]
+
+
+colnames(aggByAgg)[1] <- "Year"
+aggByAgg <- aggByAgg %>% mutate(Total = .$`under 30` + .$`30-39` + .$`40-49` + .$`50-59` + .$`60+` )
+
+US_GDP <- wb(country = "USA", indicator = "NY.GDP.MKTP.CD", startdate = 2004, enddate = 2017)  %>% mutate(value= value/1000000000, Year = as.integer(date)) %>% select("Year","value")
+
+aggByAgg <- inner_join(aggByAgg,US_GDP,by = "Year")
+
+aggByAgg$percent_of_total <- aggByAgg$Total / aggByAgg$value
+aggByAgg$percent_of_total_youngsters <- aggByAgg$`under 30` / aggByAgg$Total
+aggByAgg$percent_of_total_midage <- (aggByAgg$`30-39` + aggByAgg$`40-49`) / aggByAgg$Total
+aggByAgg$percent_of_total_lateage <- (aggByAgg$`50-59` + aggByAgg$`60+`) / aggByAgg$Total
+aggByAgg$`under 30p` <- 100 * aggByAgg$`under 30` / aggByAgg$Total
+aggByAgg$`30-39p` <- 100 * aggByAgg$`30-39` / aggByAgg$Total
+aggByAgg$`40-49p` <- 100 * aggByAgg$`40-49` / aggByAgg$Total
+aggByAgg$`50-59` <- 100 * aggByAgg$`50-59` / aggByAgg$Total
+aggByAgg$`60+p` <- 100 * aggByAgg$`60+` / aggByAgg$Total
+
+
+
+
+
+meltdf <- aggByAgg %>% 
+  select(Year,  `under 30p`,`30-39p`,`40-49p`,`50-59`,`60+p`) %>% 
+  melt(id = "Year")
+
+
+
+p4 <- ggplot( data = meltdf,) + geom_bar(aes(y = value, x = Year, fill = variable),stat="identity") +
+  #geom_text(data=charts.data, aes(x = Year, y = value,
+   #                               label = paste0(percentage,"%")), size=4) +
+  theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank()) +
+  scale_x_continuous(breaks=seq(2004,2017,2)) +
+  #scale_y_continuous(labels = dollar_format(suffix = "%", prefix = "")) +
+  labs(x="Year", y="Percentage") + theme_classic()+
+  ggtitle("Breakdown of Debt/GDP by Age Groups(%)") +
+  scale_fill_viridis(discrete = TRUE,
+                     name = "")
+p4
+
+meltdf <- aggByAgg %>% 
+  select(Year,  percent_of_total_youngsters, percent_of_total_midage, percent_of_total_lateage) %>% 
+  melt(id = "Year")
+
+p44 <- ggplot(meltdf, aes(x = Year, y = 100 * value, colour = variable)) + 
+  geom_line(size = 0.75) +
+  geom_point(size = 1) + 
+  ylab("Percent") + 
+  labs(color = "\n") + 
+  scale_color_discrete(labels = c("Percent of Total Debt by people Under 30", 
+                                  "Percent of Total Debt by people between 30 and 50",
+                                  "Percent of Total Debt by people older than 50")) + 
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, by = 10)) +
+  scale_x_continuous(limits = c(2004, 2017), breaks = seq(2004, 2017, by = 2), labels = seq(2004, 2017, by = 2)) +
+  ggtitle("Debt held by each Generation","Shockingly 'Baby-boomers' have taken an increasingly larger amount over last 15 years!") + 
+  theme_minimal() +
+  theme(legend.direction = "vertical", legend.position = "bottom", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 16)) +
+  theme(plot.title = element_text( size = 18))
+
+p44
+
+aggByAgg_1 <- aggByAgg
+```
+
+Two shocking results came out:  First the percentage of debt held by people under 30% has gone down from 42.8% to 27% and second that the debt load has been picked up by both the middle-age population who went from 47% to 53% and the population of people older than 50 almost doubled from 10% to 19%.
+
+We next looked at the same type of analysis using the number of borrowers in each group as opposed to amount of debt, also obtained from the NY Fed data.
+
+```{r}
+
+aggByAgg <- read_excel(destfile, sheet = 'data_borrowers_by_age',
+    skip = 3,col_names = TRUE)
+
+
+
+colnames(aggByAgg)[1] <- "Year"
+aggByAgg <- aggByAgg %>% mutate(Total = .$`under 30` + .$`30-39` + .$`40-49` + .$`50-59` + .$`60+` )
+
+
+
+
+
+
+aggByAgg$percent_of_total_youngsters <- aggByAgg$`under 30` / aggByAgg$Total
+aggByAgg$percent_of_total_midage <- (aggByAgg$`30-39` + aggByAgg$`40-49`) / aggByAgg$Total
+aggByAgg$percent_of_total_lateage <- (aggByAgg$`50-59` + aggByAgg$`60+`) / aggByAgg$Total
+aggByAgg$`under 30p` <- aggByAgg$`under 30` / aggByAgg$Total
+aggByAgg$`30-39p` <- aggByAgg$`30-39` / aggByAgg$Total
+aggByAgg$`40-49p` <- aggByAgg$`40-49` / aggByAgg$Total
+aggByAgg$`50-59` <- aggByAgg$`50-59` / aggByAgg$Total
+aggByAgg$`60+p` <- aggByAgg$`60+` / aggByAgg$Total
+
+
+meltdf <- aggByAgg %>% 
+  select(Year,  `under 30p`,`30-39p`,`40-49p`,`50-59`,`60+p`) %>% 
+  melt(id = "Year")
+
+
+p5 <- ggplot( data = meltdf,) + geom_bar(aes(y = 100*value, x = Year, fill = variable),stat="identity") +
+  #geom_text(data=charts.data, aes(x = Year, y = value,
+   #                               label = paste0(percentage,"%")), size=4) +
+  theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank()) +
+  scale_x_continuous(breaks=seq(2004,2017,2)) +
+  #scale_y_continuous(labels = dollar_format(suffix = "%", prefix = "")) +
+  labs(x="Year", y="Percentage") + theme_classic()+
+  ggtitle("Breakdown of number of borrowers by Age (%)") +
+  scale_fill_viridis(discrete = TRUE,
+                     name = "")
+
+p5
+
+meltdf <- aggByAgg %>% 
+  select(Year,  percent_of_total_youngsters, percent_of_total_midage, percent_of_total_lateage) %>% 
+  melt(id = "Year")
+
+ggplot(meltdf, aes(x = Year, y = 100 * value, colour = variable)) + 
+  geom_line(size = 0.75) +
+  geom_point(size = 3) + 
+  ylab("Percentage") + 
+  labs(color = "\n") +
+  scale_color_discrete(labels = c("Percent of Total Debt by people Under 30", 
+                                  "Percent of Total Debt by people between 30 and 50",
+                                  "Percent of Total Debt by people older than 50")) + 
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, by = 10)) +
+  scale_x_continuous(limits = c(2004, 2017), breaks = seq(2004, 2017, by = 2), labels = seq(2004, 2017, by = 2)) +
+  ggtitle("Number of Borrowers by Generation") + 
+  theme_minimal() +
+  theme(legend.direction = "vertical", legend.position = "bottom", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 16, face = "bold")) +
+  theme(plot.title = element_text(face = "bold", size = 18))
+
+
+```
+
+The shape of the two graphs looked very similar to the previous analysis.  Two main observations were 1) a 'bump' in the numbers of mid-age borrowers in 2012 which could have been the result of some government policy shift  and 2) that the numbers of young and mid-age borrowers were about 10% lower than the percentage of debt they respectively held (while the 'older than 50' remained the same)  This suggested to us that the mean debt per person in the 'Under 30' subcategory seen a dramatic decrease  relative to the mean debt per person in the other two age categories--implying that the 'Under 30' borrowers would be relatively unrestrained by this debt burden.   
+
+### Impact of Educational Spend by State on Amount of Debt in the State
+
+We wanted to see if we could explain why the south had such a high debt concentration.  We found data from the State Higher Education Executive Officers Association (SHEEO) organization that gave an estimate of the amount each state spent on higher education per student in 2008,2012, 2016 and 2017.  The data was in a PDF so we copied it into 'state_high_ed_exp.xlsx' spreadsheet.  We first looked at the distribution of state higher educational spending per student across the states using boxplots.  We note that Wyoming, Illinois, Alaska and North Carolina were the high outliers on spending and that Vermont, New Hampshire, Colorado and Pennsylvania were consistently low spenders on higher education.  This result was surprising as 3 of the 4 low spending states were from the North East.  
+
+```{r}
+
+# Look at correlation of state spending on Ed and the various levels of debt by borrower
+# see max R^2 for 2012 spending (for 2018 distribution -- lag makes sense) and not 2016/2017 or 2008 which was high.  The correlation is highest at the lowest debt levels (1st Q, median) and lowest at 3rd Q.
+
+
+
+
+
+location <- 'http://www.sheeo.org/sites/default/files/project-files/SHEEO_SHEF_FY2017_FINAL.pdf'
+
+destfile <- 'state_high_ed_exp.xlsx'
+# Extract the table
+state_spend <- read_excel(destfile)
+state_spend$state_name <- state.abb[match(tolower(state_spend$`Table 1`),tolower(state.name))]
+
+state_spend <- state_spend %>% separate(X__4, c("A", "B")) %>% unite(X__4,c("A", "B"),sep = "") %>% mutate( spend_2017 = as.numeric(.$X__4)) %>% mutate( spend_2016 = .$X__3) %>% mutate( spend_2008 = .$X__1) %>% mutate( spend_2012 = .$X__2) %>% select(state_name, spend_2008, spend_2012, spend_2016, spend_2017)
+
+df <- inner_join(df, state_spend, by = "state_name")
+df$GSP <- df$`Gross State Product`/df$Population
+
+tidy_state_spend <- state_spend %>% gather(key,value, -state_name)
+
+
+
+ggplot(tidy_state_spend, aes(x = factor(key), y = value)) + 
+  geom_boxplot(outlier.colour = "red", outlier.size = 3) +
+  labs(title = "Boxplots of State Spending per Student on Higher Education") + 
+  xlab("Year") + 
+  ylab("State Spending (USD/Student)") + scale_x_discrete(labels = c("2008","2012","2016","2017")) +
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 12)) +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+
+
+fit <- lm(spend_2012 ~ Median, data = df)
+
+ggplot(df, aes(x = Median, y = spend_2012)) + 
+  geom_point(aes(color = region)) +
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+
+ggplot(df, aes(Median, spend_2012))+
+  geom_point() + stat_smooth(method = "lm", col = "red")+
+  facet_wrap(~region)
+
+
+fit <- lm(spend_2012 ~ df$`1st Qu.`, data = df)
+
+ggplot(df, aes(x = df$`1st Qu.`, y = spend_2012)) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+
+fit <- lm(spend_2012 ~ df$`Income Normalized Median Debt`, data = df)
+
+ggplot(df, aes(x = df$`Income Normalized Median Debt`, y = spend_2012)) + 
+  geom_point() +
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+#ggplot(df, aes(x = Median, y = spend_2012)) + 
+#  geom_point(aes(color = region)) + stat_smooth()
+
+#ggplot(df, aes(x = Median, y = spend_2012)) + 
+ # geom_point(aes(color = division)) + stat_smooth()
+
+ggplot(df, aes(x = Median, y = spend_2012)) + 
+  geom_point(aes(color = division)) + facet_wrap(~division)
+
+  
+ggplot(df, aes(df$`Income Normalized Median Debt`, spend_2012))+
+  geom_point() + stat_smooth()+
+  facet_wrap(~region)
+
+ggplot(df, aes(Mean, spend_2012))+
+  geom_point() +
+  facet_wrap(~region)
+
+```
+
+We observed the strongest correlation R^2 of 18.2% between spending and median debt level per borrower across the states.  When faceted this relationship seemed strongest in the West and Northeast but the South and North Central states showed little correlation between spending per student and Median debt.  There was also very weak relationship between spending and any of normalized debt variables (debt to income at various quantiles) we calculated earlier.   The graphs above also highlighted that the states in the South have the lowest variance in spending per student and are all fairly close together. Note that we tried to use spending from other years (2008, 2016 and 2017) but 2012 worked best, suggesting there's a lagging impact on debt levels as we used current debt levels.  We noted that had we excluded the high and low outlier states discovered earlier in the analysis, even the relationship between the Median Debt level and the 2012 State Spending would have looked worst, suggesting extreme high or low levels of spending could impact on the debt levels carried by student in the given state years later. 
+
+### Amount of Debt distribution by Repayment Status
+
+We next wanted to look at the way debt has been distributed by repayment types.  This data, again, came from the New York Fed and was, again, annual from 2004-2017.  The data broke down debt amount and number of borrowers by status of repayment.  There were four categories of status: Debt currently in repayment -- if the debt amount has been getting paid off by borrower, Debt currently not in repayment -- if the debt amount has not been getting paid off by the borrower (because he is in school or because the loan interest in getting added to principal), Debt is delinquent -- if payment was supposed to be received and wasn't, and Debt is in Default -- if it has been delinquent for an extended period.  We plotted the two variables in stacked bar charts to see if a pattern would emerge.
+
+```{r}
+url <- "https://studentaid.ed.gov/sa/sites/default/files/fsawg/datacenter/library/Portfolio-by-Location-by-Age.xls"
+destfile <- "Portfolio-by-Location-by-Age.xls"
+curl::curl_download(url, destfile)
+Portfolio_by_Debt_Size <- read_excel(destfile, 
+    skip = 5)
+
+
+
+```
+
+
+```{r}
+
+# number of borrowers by repayment status by year from NY Fed
+destfile <- "sl_update_2018.xlsx"
+numByYearStatus <- read_excel(destfile, sheet = 'data_repayment_status_number',
+    skip = 3,col_names = TRUE)
+numByYearStatus <- numByYearStatus[1:15,1:6]
+colnames(numByYearStatus)[1] <- "year"
+numByYearStatus$repayment <- numByYearStatus$`current, balance lower than previous quarter`/numByYearStatus$Total
+numByYearStatus$'not in repayment' <- numByYearStatus$`current, balance same or higher than previous quarter`/numByYearStatus$Total
+numByYearStatus$deliquent <- numByYearStatus$`90+ delinquent`/numByYearStatus$Total
+numByYearStatus$defaulted <- numByYearStatus$default/numByYearStatus$Total
+
+meltdf <- numByYearStatus %>% 
+  select(year, repayment,'not in repayment',deliquent,defaulted) %>% 
+  melt(id = "year")
+
+
+
+p6 <- ggplot( data = meltdf,) + geom_bar(aes(y = 100*value, x = year, fill = variable),stat="identity") +
+  #geom_text(data=charts.data, aes(x = Year, y = value,
+   #                               label = paste0(percentage,"%")), size=4) +
+  theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank()) +
+  scale_x_discrete(breaks=seq(2003,2017,2)) +
+  #scale_y_continuous(labels = dollar_format(suffix = "%", prefix = "")) +
+  labs(x="Year", y="Percentage") + theme_classic()+
+  ggtitle("Breakdown of numbers of borrowers by Status (%)") +
+  scale_fill_viridis_d("Status of Loan:") + theme(legend.position = "bottom")
+
+p6
+
+
+
+# total dollars debt by repayment status by year 
+amnByYearStatus <- read_excel(destfile, sheet = 'data_repayment_status_balance',
+    skip = 4,col_names = TRUE)
+amnByYearStatus <- amnByYearStatus[1:15,1:6]
+colnames(amnByYearStatus)[1] <- "year"
+
+amnByYearStatus$repayment <- amnByYearStatus$`current, balance down`/amnByYearStatus$Total
+amnByYearStatus$'not in repayment' <- amnByYearStatus$`current, balance same or up`/amnByYearStatus$Total
+amnByYearStatus$deliquent <- amnByYearStatus$delinquent/amnByYearStatus$Total
+amnByYearStatus$defaulted <- amnByYearStatus$default/amnByYearStatus$Total
+
+meltdf <- amnByYearStatus %>% 
+  select(year, repayment,'not in repayment',deliquent,defaulted) %>% 
+  melt(id = "year")
+
+
+
+
+p7 <-  ggplot( data = meltdf,) + geom_bar(aes(y = 100*value, x = year, fill = variable),stat="identity") +
+  #geom_text(data=charts.data, aes(x = Year, y = value,
+   #                               label = paste0(percentage,"%")), size=4) +
+  theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank()) +
+  scale_x_continuous(breaks=seq(2003,2017,2)) +
+  #scale_y_continuous(labels = dollar_format(suffix = "%", prefix = "")) +
+  labs(x="Year", y="Percentage") + theme_classic()+
+  ggtitle("Breakdown of amount of debt by Status (%)") +
+  scale_fill_viridis_d("Status of Loan:") + theme(legend.position = "bottom", legend.title = )
+
+p7
+```
+
+We couldn't identify any strong patterns in the first graph which looked at numbers of borrowers.  The second graph, however, showed that since 2013 there's been a decline in the amount of loans in repayment and a corresponding increase the amount of loans not in repayment, while percentage of loans in the 'default' and 'delinquent' buckets remained stable.  We also looked at the data in dot plot with lines to confirm this.  
+
+
+```{r}
+
+ggplot(meltdf, aes(x = year, y = 100 * value, colour = variable)) + 
+  geom_line(size = 0.75) +
+  geom_point(size = 3) + 
+  ylab("Percentage") + 
+  labs(color = "\n") +
+  #scale_color_discrete(labels = c("Percent of Total Debt by people Under 30", 
+   #                               "Percent of Total Debt by people between 30 and 50",
+    #                              "Percent of Total Debt by people older than 50")) + 
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, by = 10)) +
+  scale_x_continuous(limits = c(2004, 2017), breaks = seq(2004, 2017, by = 2), labels = seq(2004, 2017, by = 2)) +
+  ggtitle("Debt percentage by Year") + 
+  theme_minimal() +
+  theme(legend.direction = "vertical", legend.position = "bottom", 
+        legend.text = element_text(size = 16)) + 
+  theme(axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 18, face = "bold")) +
+  theme(plot.title = element_text(face = "bold", size = 24))
+```
+
+We suspected that this could be an explanation of the observation earlier that while debt has continued to grow, the number of borrowers has not.  We looked at this by using a graph with data scaled to the value at 2013 for both Debt/GDP, Number of Borrowers/Working Age Population and Percentage of Loans not in repayment.  
+
+```{r}
+# trying to see if there's linkage in the paradim shift between lack of growth of new borrowers and growth in the percentage of borrowers not in repayment.
+
+plot_data_6 <- inner_join(inner_join(data.frame(year = amnByYearStatus$year,amnByYearStatus$'not in repayment'),plot_data_5,by = "year"), plot_data_4 %>% filter(key == "debt_GDP") %>% mutate(debt_gdp = value) %>% select(year,debt_gdp),by ="year") %>% mutate("Percent Debt Not In Repayment (USD)" = 100* amnByYearStatus$'not in repayment'/amnByYearStatus$'not in repayment'[11], 'Numbers of Borrowers' = 100 * borrowers_total / borrowers_total[11], 'Amount of Debt (USD/GDP)' = 100* debt_gdp/debt_gdp[11]) %>% select(year, period, "Percent Debt Not In Repayment (USD)",'Amount of Debt (USD/GDP)','Numbers of Borrowers') %>% gather(key,value,-year,-period)
+
+ggplot(plot_data_6 , aes(x = year, y = value)) + 
+  geom_line(aes(color = key), size = 1) + 
+  scale_color_manual(values = c("#00AFBB", "#E7B800","coral3","khaki2")) +
+  theme_minimal() + ggtitle("Growth Since 2013..", subtitle = "Possibly explained by growth of nominal amount of debt not in repayment") + ylab('Relative Scale for 2013') + theme(
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  scale_x_continuous(limits = c(2004, 2017), breaks = seq(2004, 2017, by = 2), labels = seq(2004, 2017, by = 2))
+```
+
+This graph was qualitatively telling: loans that are not in repayment have, by definition, principal debt amount that is growing per borrower every year so this trend suggested that even if the number of borrowers stayed constant, the debt amount per person would grow faster from 2013 than it did from 2003.  This find, if true, is concerning because it shows that in the last 5 years a significant amount of the debt (and growth in debt) has shifted to a category, which is fundamentally riskier.  Combined with the age demographic shift seen earlier, which suggested the debt loaded shifted to older age groups, which theoretically should be able to service the debt (and which can't enjoy the same career growth prospects that 'under 30' graduates may enjoy) but evidently haven't been able to, this is concerning.
+
+### Borrower Default Rates by State
+
+We used the datasets of `defaultRateByState2012.csv` and `defaultRateByState2015.csv` which were respectively downloaded from the Minnesota Office of Higher Education and the Department of Education. We looked at the `Borrower Default Rate`, which in both datasets refers to the *Cohort Default Rates (CDRs)* which measure the share of federal student loan borrowers who default within a specified period of time after entering repayment. For instance, the most recent CDRs as shown in the dataset `defaultRateByState2015.csv` is the *FY 2015 Official Cohort Default Rates by State/Territory* which was released in September 2018 and shows that borrowers who entered repayment in federal fiscal year 2015 (FY15) and defaulted in FY15, FY16, or FY17. Similar definitions applies to the dataset `defaultRateByState2012.csv`.   
+
+The reason why we chose to analyze the datasets in fiscal year 2012 and 2015 is that they are the only directly usable datasets which we found on the internet. In addition, the formats of the original two pdf files are somewhat different, so are the corresponding csv files. Therefore, we performed some preprocessing on the csv files with Excel before loading them into R, and will further format them in the following analysis.
+
+```{r, include = FALSE}
+dfDefault2012 <- read.csv("defaultRateByState2012.csv", 
+                          skip = 2, 
+                          header = TRUE, 
+                          check.names = TRUE)
+
+dfDefault2012$State <- as.character(dfDefault2012$State)
+
+dfDefault2012$Number.of.Borrowers.in.Default <- 
+  as.integer(dfDefault2012$Number.of.Borrowers.in.Default)
+
+dfDefault2012$Number.of.Borrowers.Entered.Repayment <- 
+  as.integer(dfDefault2012$Number.of.Borrowers.Entered.Repayment)
+
+dfDefault2012$Borrower.Default.Rate <-
+  dfDefault2012$Number.of.Borrowers.in.Default/dfDefault2012$Number.of.Borrowers.Entered.Repayment*100
+
+dfDefault2012$Borrower.Default.Rate <- as.numeric(round(dfDefault2012$Borrower.Default.Rate, 1))
+
+year <- factor(rep(2012, each = nrow(dfDefault2012)))
+dfDefault2012 <- dfDefault2012 %>%
+  mutate(Year = year)
+
+#head(dfDefault2012, n = 3)
+
+
+dfDefault2015 <- read.csv("defaultRateByState2015.csv", 
+                          skip = 2, 
+                          header = TRUE, 
+                          check.names = TRUE)
+
+dfDefault2015$State <- as.character(dfDefault2015$State)
+
+dfDefault2015$Number.of.Borrowers.in.Default <- 
+  as.integer(dfDefault2015$Number.of.Borrowers.in.Default)
+
+dfDefault2015$Number.of.Borrowers.Entered.Repayment <- 
+  as.integer(dfDefault2015$Number.of.Borrowers.Entered.Repayment)
+
+dfDefault2015$Borrower.Default.Rate <- 
+  dfDefault2015$Number.of.Borrowers.in.Default/dfDefault2015$Number.of.Borrowers.Entered.Repayment*100 
+
+dfDefault2015$Borrower.Default.Rate <- as.numeric(round(dfDefault2015$Borrower.Default.Rate, 1))
+
+year <- factor(rep(2015, each = nrow(dfDefault2015)))
+dfDefault2015 <- dfDefault2015 %>%
+  mutate(Year = year)
+
+#head(dfDefault2015, n = 3)
+
+
+dfDefault <- rbind.data.frame(dfDefault2012, dfDefault2015)
+#head(dfDefault, n = 3)
+tail(dfDefault, n = 3)
+
+```
+
+The Cleveland dot plots of `Borrower Default Rate` by `State` for fiscal year 2012 and 2015 are shown side by side below. As we see, plots in both years have been sorted by `Borrower Default Rate`. In 2012, the highest default rate was 20.1%, which was from *New Mexico*, whereas in 2015, it dropped to 17.8% and it was from *West Virginia*. Similarly, in 2012, *Guam* has the lowest default rate 4.5%, while in 2015, the lowest rate was 5.9% and it was from *Vermont*. In addition, changes of the default rates in other states between two years were also observed.
+
+```{r, fig.height = 12, fig.width = 15}
+theme_dotplot <- theme_bw(14) +
+  theme(axis.text.y = element_text(size = rel(.75)),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_text(size = rel(.75)),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(size = 0.5),
+        panel.grid.minor.x = element_blank())
+
+
+require(gridExtra)
+
+plot1 <- ggplot(dfDefault2012, aes(x = Borrower.Default.Rate, 
+                                   y = reorder(State, Borrower.Default.Rate))) +
+  geom_point(size = 4, color = "red") +
+  scale_x_continuous(limits = c(4, 22), breaks = seq(4, 22, 2)) +
+  theme_dotplot +
+  xlab("Borrower Default Rate (in Percent)") +
+  ylab("State") +
+  ggtitle("Borrower Default Rate by State in 2012") +
+  theme(axis.text.x = element_text(face = "bold", color = "brown", size = 12),
+        axis.text.y = element_text(face = "bold", color = "brown", size = 12)) +
+  theme(text = element_text(face = "bold", size = 18)) +
+  theme(plot.title = element_text(face = "bold", size = 16))
+
+
+plot2 <- ggplot(dfDefault2015, aes(x = Borrower.Default.Rate, 
+                                   y = reorder(State, Borrower.Default.Rate))) +
+  geom_point(size = 4, color = "blue") +
+  scale_x_continuous(limits = c(4, 22), breaks = seq(4, 22, 2)) +
+  theme_dotplot +
+  xlab("Borrower Default Rate (in Percent)") +
+  ylab("State") +
+  ggtitle("Borrower Default Rate by State in 2015 ") +
+  theme(axis.text.x = element_text(face = "bold", color = "brown", size = 12),
+        axis.text.y = element_text(face = "bold", color = "brown", size = 12)) +
+  theme(text = element_text(face = "bold", size = 18)) +
+  theme(plot.title = element_text(face = "bold", size = 16))
+
+grid.arrange(plot1, plot2, ncol = 2)
+
+```
+
+The Boxplots of `Borrower Default Rate` by `State` for both fiscal years are shown in below. The median `Borrower Default Rate` in 2012 was 11.4%, while in 2015, it was 10.6%. The boxplot for 2015 has an outlier which was from *West Virginia*, whereas the 2012 boxplot didn't have any outliers. In addition, the `Borrower Default Rate` in 2012 appeared more spread-out than it did in 2015.
+
+```{r, fig.height = 6, fig.width = 7}
+
+
+is_outlier <- function(x) {
+  return(x < quantile(x, 0.25) - 1.5 * IQR(x) | x > quantile(x, 0.75) + 1.5 * IQR(x))
+}
+
+dfOutlier <- dfDefault %>% 
+  group_by(Year) %>%
+  mutate(outlierState = ifelse(is_outlier(Borrower.Default.Rate), State, as.character(NA)))
+
+dfOutlier <- as.data.frame(dfOutlier)
+
+
+outLabs <- dfOutlier %>%  
+  filter(!is.na(outlierState)) %>%
+  select(Borrower.Default.Rate, Year, outlierState)
+
+outLabs <- as_tibble(outLabs)
+
+
+medians <- summarise(group_by(dfDefault, Year), 
+                     MD = round(median(Borrower.Default.Rate), 1), 
+                     nsmall = 2)
+
+
+ggplot(dfOutlier, aes(x = Year, y = Borrower.Default.Rate)) + 
+  geom_boxplot(outlier.colour = "red", outlier.size = 3) +
+  geom_text_repel(data = outLabs, aes(Year, Borrower.Default.Rate, label = outlierState),
+                  position = position_dodge(width = 0.8), size = 4, vjust = -1.0) +
+  geom_text(data = medians, aes(Year, MD, label = MD), 
+            position = position_dodge(width = 0.8), size = 4, vjust = -0.5) + 
+  labs(title = "Boxplots of Borrower Default Rate by Year") + 
+  xlab("Year") + 
+  ylab("Borrower Default Rate (in Percent)") + 
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 12)) +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+
+```
+
+The spatial heat maps of `Borrower Default Rate` by `State` for the year 2012 and 2015 are respectively shown in below. Obviously, the varying pattern of default rates appear more vivid by overlaid with a US map with state political boundaries. Because the built-in function `StateChoropleth` in the `choroplethr` cannot map *guam*, *puerto rico* and *virgin islands*, so these territories are filtered out before fed into `StateChoropleth`. 
+
+```{r, fig.height = 6, fig.width = 10}
+
+dfDefault2012$State <- tolower(dfDefault2012$State)
+
+defaultByState2012 <- dfDefault2012 %>%
+  filter(!(State %in% c('guam', 'puerto rico', 'virgin islands'))) %>%
+  select(State, Borrower.Default.Rate)
+
+colnames(defaultByState2012) <- c("region", "value")
+
+
+col.pal <- brewer.pal(7, "Oranges")
+choro1 <- StateChoropleth$new(defaultByState2012)
+choro1$title = "Heatmap for Borrower Default Rate by State in Fiscal Year 2012"
+choro1$ggplot_scale <- scale_fill_manual(name = "Borrower Default Rate in Percent", 
+                                         values = col.pal, drop = FALSE)
+choro1$render()
+
+```
+
+
+```{r, fig.height = 6, fig.width = 10}
+
+dfDefault2015$State <- tolower(dfDefault2015$State)
+
+defaultByState2015 <- dfDefault2015 %>%
+  filter(!(State %in% c('guam', 'puerto rico', 'virgin islands'))) %>%
+  select(State, Borrower.Default.Rate)
+
+colnames(defaultByState2015) <- c("region", "value")
+
+
+col.pal <- brewer.pal(7, "Greens")
+choro1 <- StateChoropleth$new(defaultByState2015)
+choro1$title = "Heatmap for Borrower Default Rate by State in Fiscal Year 2015"
+choro1$ggplot_scale <- scale_fill_manual(name = "Borrower Default Rate in Percent", 
+                                         values = col.pal, drop = FALSE)
+choro1$render()
+
+```
+
+Here we presented visualizations to demonstrate the distribution of the variable `Borrower Default Rate` by `State` for fiscal year 2012 and 2015. Some states showed higher default rates than other states, and overall the default rates in fiscal year 2015 have decreased a bit, compared with 2012.  
+
+Next we looked at the default rate compare to state GDP per capita, Personal Income per capita, both calculated earlier, and the state unemployment rate for 2017.
+
+```{r}
+dfDefault2015$state_name <- state.abb[match(dfDefault2015$State,tolower(state.name))]
+dfDefault2012$state_name <- state.abb[match(dfDefault2012$State,tolower(state.name))]
+
+temp <- dfDefault2015 %>% mutate(Borrower.Default.Rate.2015 = Borrower.Default.Rate) %>% select(state_name, Borrower.Default.Rate.2015) %>% filter(!is.na(state_name ))
+
+df$Borrower.Default.Rate.2015 <- temp$Borrower.Default.Rate.2015
+
+temp <- dfDefault2012 %>% mutate(Borrower.Default.Rate.2012 = Borrower.Default.Rate) %>% select(state_name, Borrower.Default.Rate.2012) %>% filter(!is.na(state_name ))
+
+df$Borrower.Default.Rate.2012 <- temp$Borrower.Default.Rate.2012
+
+# 16.4% GDP/capita to default rate
+fit <- lm(Borrower.Default.Rate.2015 ~ df$GSP, data = df)
+
+ggplot(df, aes(x = df$GSP, y = Borrower.Default.Rate.2015)) + 
+  geom_point() + ggtitle("2015 Default Rate versus State GDP/Capita") + xlab("GDP/Capita (USD)")+
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+fit <- lm(Borrower.Default.Rate.2015 ~ df$PPP, data = df)
+
+# 21.6% GDP/PPP to default rate
+ggplot(df, aes(x = df$PPP, y = Borrower.Default.Rate.2015)) + 
+  geom_point() + ggtitle("2015 Default Rate versus State Personal Income/Capita") + xlab("State Personal Income/Capita (USD)")+
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+fit <- lm(Borrower.Default.Rate.2015 ~ df$`Unemployment rate`, data = df)
+
+# 26% GDP/unemployment rate to default rate
+ggplot(df, aes(x = df$`Unemployment rate`, y = Borrower.Default.Rate.2015)) + 
+  geom_point() + ggtitle("2015 Default Rate versus 2017 State Unemployment Rate ") + xlab("Unemployment Rate (%)")+
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+```
+
+Above, we identified a reasonable correlation between student loan default rate and the macro economic indicators by state.  In particular, the unemployment rate in 2017 showed a linear relationship with the 2015 with an R^2 of 26%.   
+
+### Multivariate Analysis of State Data
+
+From the previous analysis were were able to get State Spending and Default Rates by state.  In this section, we attempted to combine these two variables with the previously collected information per state--namely the amount of debt and number of borrowers at the various bin levels from the Department of Ed.  We were also able to combine this data with the Economic Data per state obtained from the St. Louis Fed, the World Bank and the UKCPR.  From a technical perspective, this showed that our approach of starting the project with simple questions and using one data-frame resulted in the gradual buildup of a unique data-set that we collected with all the information studied up to now.  
+
+We started by trying to see patterns using a scatter-plot matrix of all the variables we deemed potentially correlated.   We made sure to use variables that were all normalized and in percentages and not absolute levels.  The variable that seemed to show the strongest relationship to other variables was the 'Borrower Default Rate' (in particular 2015), which we then tried to plot versus various measures of debt per borrower per state (i.e. median, mean, quantiles).  We also tried it against 'state spend' normalized to personal income.  For each variable we tried to see a regional affect by faceting by region.  Note, we would ideally have looked at the dependent variable, default rate, from a following year rather than proceeding year to the independent variables, but we weren't able to obtain this data.  
+
+```{r, label = "hi"}
+
+df$spend_2012.by.PPP <- df$spend_2012 / (df$PPP*1000)
+
+variables <- c( "Unemployment rate","Personal income per capita","GSP","Income Normalized Mean Debt","Income Normalized Median Debt","Income Normalized 3rd Qu. Debt","Percentage of Population with Student Debt","Borrower.Default.Rate.2015","Borrower.Default.Rate.2012","spend_2012.by.PPP")
+
+pairs(df[variables])
+
+
+
+
+# positive correlation to normalized mean!!!
+# fit <- lm( Borrower.Default.Rate.2015~ df$`Income Normalized Mean Debt`, data = df)
+# 
+# # 21.6% GDP/PPP to default rate
+# ggplot(df, aes(x = df$`Income Normalized Mean Debt`, y = Borrower.Default.Rate.2015)) + 
+#   geom_point(aes(color = region)) + ggtitle("2015 Default Rate versus State Mean Debt/Personal Income") + xlab("Mean Debt/Personal Income (USD)")+
+#   stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+#                      "Intercept =",signif(fit$coef[[1]],5 ),
+#                      " Slope =",signif(fit$coef[[2]], 5),
+#                      " P =",signif(summary(fit)$coef[2,4], 5)))
+# 
+# 
+# ggplot(df, aes(x = df$`Income Normalized Mean Debt`, y = Borrower.Default.Rate.2015)) + 
+#    geom_point(aes(color = region)) + facet_wrap(~region)
+
+# positive correlation to normalized mean!!! 16%, a little lower for median
+#ggplot(df, aes(x = df$`Income Normalized Median Debt`, y = Borrower.Default.Rate.2015))  +
+ #  geom_point(aes(color = region)) + facet_wrap(~region)
+
+fit <- lm( Borrower.Default.Rate.2015~ df$`Income Normalized 3rd Qu. Debt`, data = df)
+
+# 21.6% GDP/PPP to default rate
+ggplot(df, aes(x = 100*df$`Income Normalized 3rd Qu. Debt`, y = Borrower.Default.Rate.2015)) + 
+  geom_point(aes(color = region)) + ggtitle("2015 Default Rate versus 3rd Quantile State Debt/Personal Income") + xlab("3rd Quantile State Debt/Personal Income (%)")+
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+
+ggplot(df, aes(x = df$`Income Normalized 3rd Qu. Debt`, y = Borrower.Default.Rate.2015)) + 
+   geom_point(aes(color = region)) + facet_wrap(~region) + ggtitle("2015 Default Rate versus 3rd Quantile State Debt/Personal Income", subtitle = "faceted by region") + xlab("3rd Quantile State Debt/Personal Income (%)")
+
+
+
+fit <- lm( Borrower.Default.Rate.2015~ df$spend_2012.by.PPP, data = df)
+
+# 21.6% GDP/PPP to default rate
+ggplot(df, aes(x = 100*df$spend_2012.by.PPP, y = Borrower.Default.Rate.2015)) + 
+  geom_point(aes(color = region)) + ggtitle("2015 Default Rate versus 2012 State Spend/Personal Income") + xlab("2012 State Spend/Personal Income (%)")+
+  stat_smooth(method = "lm", col = "red") + labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                     "Intercept =",signif(fit$coef[[1]],5 ),
+                     " Slope =",signif(fit$coef[[2]], 5),
+                     " P =",signif(summary(fit)$coef[2,4], 5)))
+
+
+ggplot(df, aes(x = 100*df$spend_2012.by.PPP, y = Borrower.Default.Rate.2015)) + 
+   geom_point(aes(color = region)) + facet_wrap(~region) + ggtitle("2015 Default Rate versus State Spend/Personal Income", subtitle = "faceted by region") + xlab("State Spend/Personal Income (%)")
+
+
+
+
+
+# 12.5% for dpend/ppp
+
+```
+
+The two results that stood out were the paired variables 'Borrower Default Rate.2015' and '3rd Quantile Debt/Personal Income' and 'Borrower Default Rate.2015' and '2012 State Spending/Personal Income', which had respective R^2 of 16.5% and 12.5%.  When we looked at both of these faceted by 'region', however, the results looked less clear.  Of note was the second faceted graph where states in the West, in particular, showed a strong correlation between state spending relative to income and borrower default rate.  Considering the sample size we would need to do more analysis to conclude this is a real pattern.  
+
+Finally, we looked at a parallel coordinate plots.  First on a stand-alone basis and next faceted by 'region'. 
+
+```{r, fig.height=6, fig.width=15}
+
+
+df$region <- as.factor(df$region)
+
+ggparcoord(df, columns = match(variables,colnames(df)),groupColumn = "region", scale = "uniminmax",,alphaLines = .5)  + 
+  theme( axis.text.x = element_text(angle = 90))
+
+
+```
+
+```{r,fig.height=10, fig.width=15}
+ggparcoord(df, columns = match(variables,colnames(df)),groupColumn = "region", scale = "uniminmax",,alphaLines = .5) + facet_grid(region ~.) + 
+  theme( axis.text.x = element_text(angle = 90))
+
+```
+
+It proved difficult to get insight from the graph that wasn't faceted by 'region' on a stand-alone basis.  We found, however, that looking at both graphs simultaneously we could observe trends.  In particular, the graphs highlighted, that the Northeast enjoys high economic indicators (the left region of the graph) correlated with low amounts of debt (middle region of graph) and that the opposite trend exists for the South.   The North Central and West were more diverse across these two subjects.  The graph also showed a new potential observation in that states with high levels of student population (as reflected by high 'Percentage of Population with Student Debt') spent more on higher education per income (as reflected by the 'spend_2012.by.PPP') 
+
+# Executive summary 
+
+<b> The amount of lending to college students done by the US government, through the Department of Education, has exploded in the last 15 year!  Since 2003 we have found that the aggregate amount of loans outstanding to the US Government has grown 5.5x from $253bn to $1414b.  During the time the number of people who borrowed money from the Federal Government has grown 2.5x from 18.4mm to 44.2mm.  </b>
+
+```{r, fig.align="center", fig.width=9, fig.height=5 }
+ggplot(plot_data_4, aes(x = factor(year), y = value, fill = key, width = 0.5)) +
+  geom_bar(stat = "identity", position = "dodge",color = "black") +
+  #scale_x_discrete(breaks = seq(2003, 2017, by = 2)) +
+  #scale_x_discrete(limits = c(2002.5,2018.5), breaks = seq(2003, 2018, by = 1))+
+  scale_y_continuous(limits = c(0, 9), breaks = seq(0, 9, by = 2)) +
+  xlab("Year") + 
+  ylab("Total Debt/Total Income (percent)") + 
+  labs(title = "Aggregate Student Debt relative to GDP and Income has grown by 3x since 2003..",subtitle="Economic Growth has not matched growth in lending...", caption = "Source: NY Federal Reserve, Federal Student Aid\n*2018 data as of end of Q3") + 
+  theme(plot.title = element_text(face = "bold", size = 14)) +
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 12)) +
+  theme_classic() + #scale_fill_viridis_d(labels = c("Percent of GDP", "Percent of \nPersonal Income")) 
+  scale_fill_manual(name = "Economic\nIndicator",labels = c("Percent of GDP", "Percent of \nPersonal Income"), values = c("black", "yellow")) + 
+  geom_label(aes(x=14,y = 8,label = "By 2018 over 8.0% of Personal Income \nand 6.8% of GDP"),size=4,fill="lightgrey",hjust="inward",vjust="inward") + 
+  geom_label(aes(x=1,y = 4,label = "In 2003 only 2.6% of Personal  Income and \n 2.14% of GDP"),size=4,fill="lightgrey",hjust="inward",vjust = "inward") 
+```
+
+<b> Since 2013, however, there's been a relative slow-down in the growth in the number of borrowers nationally relative to growth in working age adults (people ages 18-64)... </b>
+
+```{r, fig.align="center", fig.width=9, fig.height=5 }
+ggplot(plot_data_5, aes( x = year,color = factor(period),y = borrowers_total, width = 0.5)) + 
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  geom_point() +
+  geom_smooth(se = FALSE, method = lm) +
+  #scale_x_discrete(breaks = seq(2003, 2018, by = 1)) +
+  scale_x_continuous(limits = c(2002.5,2018.5), breaks = seq(2003, 2018, by = 1)) +
+  scale_y_continuous(limits = c(0, 25), breaks = seq(0, 25, by = 5)) +
+  xlab("Year") + scale_color_manual(name="Period",labels = c("2003-2013", "2013-2017"), values = c("yellow", "black")) +
+  ylab("Total US working age population with student debt (percent)") + 
+  labs(title = "While the percentage of borrowers out of working age adults doubled from 2003 to 2013, \nit has remained fairly stable since...", caption = "Source: NY Federal Reserve, Federal Student Aid\n*2018 data as of end of Q3") +
+  theme(axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10),
+        axis.title = element_text(face = "bold", color = "black", size = 12)) + theme_classic() +  #guides(color=FALSE) +
+  geom_label(aes(x=2005,y = 20,label = "From 2003 to 2013\nApproximately 8% growth rate a year"),size=4,fill="lightgrey") + 
+  geom_label(aes(x=2016,y = 25,label = "From 2013 to 2018\nApproximately 0% growth rate a year"),size=4,fill="lightgrey",hjust="inward",vjust = "inward")
+```
+
+<b> We believe, that this might be explained by the fact that the amount of debt 'not in repayment' as percentage of all outstanding debt, as reported by the Department of Education, has gone up. This is the proportion of debt where the borrower is not actively paying off the loan on a regular basis and the debt grows instead...</b>
+
+```{r, fig.align="center", fig.width=11, fig.height=5 }
+p7 <-  ggplot( data = meltdf,) + geom_bar(aes(y = 100*value, x = year, fill = variable),stat="identity") +
+  #geom_text(data=charts.data, aes(x = Year, y = value,
+   #                               label = paste0(percentage,"%")), size=4) +
+  theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank()) +
+  scale_x_continuous(breaks=seq(2003,2017,2)) +
+  #scale_y_continuous(labels = dollar_format(suffix = "%", prefix = "")) +
+  labs(x="Year", y="Percentage") + theme_classic()+
+  ggtitle("Breakdown of Totaly Amount of Debt by Status (%)") +
+  scale_fill_viridis_d("Status:") + theme(legend.position = "bottom", legend.title = )
+
+
+p8 <- ggplot(plot_data_6 , aes(x = year, y = value)) + 
+  geom_line(aes(color = key), size = 1) + 
+  #scale_color_manual(values = c("#00AFBB", "#E7B800","coral3","khaki2")) +
+  scale_color_viridis_d("")+xlab("Year")+
+  theme_minimal() + ggtitle("Until 2012 Percent of debt in Repayment was going down..", subtitle = "Since then it has gone up 10%,\npossibly offsetting slow growth in the number of borrowers \nand helping keep total debt amount high") + ylab('') + theme(
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) + scale_y_continuous(limits = c(80, 120), breaks = seq(80, 120, by = 10)) +
+  scale_x_continuous(limits = c(2010, 2017), breaks = seq(2008, 2017, by = 2), labels = seq(2008, 2017, by = 2))+ theme(legend.position = "bottom")
+
+grid.arrange(p7,p8, ncol = 2)
+```
+
+<b>  Unexpectedly, our findings suggest that the total student debt load has shifted from one generation to another, with the percentage of debt owed by people under the age of 30 dropping from 42.8% in 2003 to 27% in 2017.  This debt load was surprisingly picked up largely by people over 50 who went from owing 10% of the total outstanding in 2003 to 19% in 2017</b>
+
+```{r, fig.align="center", fig.width=11, fig.height=5 }
+
+meltdf <- aggByAgg_1 %>% 
+  select(Year,  `under 30p`,`30-39p`,`40-49p`,`50-59`,`60+p`) %>% 
+  melt(id = "Year")
+
+
+
+p4 <- ggplot( data = meltdf,) + geom_bar(aes(y = value, x = Year, fill = variable),stat="identity") +
+  #geom_text(data=charts.data, aes(x = Year, y = value,
+   #                               label = paste0(percentage,"%")), size=4) +
+  theme(legend.position="bottom", legend.direction="horizontal", legend.title = element_blank()) +
+  scale_x_continuous(breaks=seq(2004,2017,2)) +
+  #scale_y_continuous(labels = dollar_format(suffix = "%", prefix = "")) +
+  labs(x="Year", y="Percentage") + theme_classic()+
+  ggtitle("Breakdown of Debt/GDP by Age Groups(%)") +
+  scale_fill_viridis(discrete = TRUE,
+                     name = "")
+
+meltdf <- aggByAgg_1 %>% 
+  select(Year,  percent_of_total_youngsters, percent_of_total_midage, percent_of_total_lateage) %>% 
+  melt(id = "Year")
+
+p44 <- ggplot(meltdf, aes(x = Year, y = 100 * value, colour = variable)) + 
+  geom_line(size = 0.75) +
+  geom_point(size = 1) + 
+  ylab("Percent") + 
+  labs(color = "\n") + 
+  scale_color_discrete(labels = c("Percent of Total Debt by people Under 30", 
+                                  "Percent of Total Debt by people between 30 and 50",
+                                  "Percent of Total Debt by people older than 50")) + 
+  scale_y_continuous(limits = c(0, 60), breaks = seq(0, 60, by = 20)) +
+  scale_x_continuous(limits = c(2004, 2017), breaks = seq(2004, 2017, by = 2), labels = seq(2004, 2017, by = 2)) +
+  ggtitle("Debt held by each Generation","Shockingly 'Baby-boomers' have taken an increasingly larger amount over last 15 years!") + 
+  theme_minimal() +
+  theme(legend.direction = "horizontal", legend.position = "bottom", 
+        legend.text = element_text(size = 10)) + 
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 16)) +
+  theme(plot.title = element_text( size = 14))
+
+
+x <- p4 + scale_fill_viridis_d("Age Group:") + theme(legend.position = "bottom")
+
+y <- p44 + scale_color_viridis_d(labels = c("Millennials", 
+                                  "Generation-X",
+                                  "Baby boomers")) +ggtitle("Percent of Debt held by Different Generations",subtitle = "To our surprise, \nmost student loan debt is owed by 'Gen-X' and 'Baby boomers'") 
+
+grid.arrange(x,y, ncol = 2)
+```
+
+<b> The three states with the highest mean debt/income ratios are respectively Mississippi, Georgia and South Carolina and the three states with the lowest are Connecticut, Massachusetts and North Dakota. The states that have the biggest mean Debt to Personal Income Per person tend to be in the south-east --in fact, they are mostly the old confederate states. In 2015, the states that has the highest student loan default rates were West Virginia, New Mexico and Nevada and the lowest were Vermont, Massachusetts and North Dakota.  There is high overlap for the high and low 10 in both these categories with some outliers like Wyoming and South Carolina.</b>
+
+```{r, fig.height = 5, fig.width = 10}
+
+debtByState$value <- debtByState$value*100
+col.pal <- brewer.pal(4, "Greens")
+choro1 <- StateChoropleth$new(debtByState)
+choro1$set_num_colors(4)
+choro1$title = "          Mean Debt by Average Personal Income by State 2018"
+choro1$ggplot_scale <- scale_fill_manual(name = "Mean Debt by Income in Percent", 
+                                         values = col.pal, drop = FALSE)
+choro1$render()
+
+col.pal <- brewer.pal(4, "Greens")
+choro1 <- StateChoropleth$new(defaultByState2015)
+choro1$set_num_colors(4)
+choro1$title = "          Borrower Default Rate by State in Fiscal Year 2015"
+choro1$ggplot_scale <- scale_fill_manual(name = "Borrower Default Rate in Percent", 
+                                         values = col.pal, drop = FALSE)
+choro1$render()
+
+```
+
+# Interactive component
+
+One of the most significant findings in our study shows that: the percentage of debt held by people under 30 has gone down from 42.8% to 27%, however, the debt held by population groups of both middle-age and older than 50 have respectively gone up from 47% to 53%, as well as from 10% to 19%, which is a very unsual. We deciede to share these two discoveries with the public by visualizing them interactively and publishing the animated graphs on the internet.
+
+We have used D3.js to build an easy-to-use, interactive chart to show the trend of the Debt Held by Each Generation from 2004 to 2017. The link to the dynamic graph is as follows:
+
+https://kundata.github.io/Final-Report-Interactive/index.html
+
+As we see, the time series of the percentage of the total debt held by each age group are represented by different colors: orange for people between 30 and 50, blue for people under 30 and green for people above 50. There is a Draw Time Series button on the top left corner of the graph system. After you click it for the first time, three group of dots will pop up with each dot denoting the percent of total debt held by a specific group in a specific year. Then, three lines will pass through each group of dots to show the trends in a more intuitive way. Near the end of each line or each group of dots, there will be a label in the same color to tell you which group the line and/or dots represent. If you want to see the number of percentage that a specific dot represents, just mouse over it, then a tooltip will pop up to show you all the information you might be interested in, meanwhile, the dot of interest will zoom in, and then go back to its original size once you move your mouse out of it. In addition, the Draw Time Series button can be clicked as many times as you want, the only difference from the first time you click it is: the lines will be re-drawn, but the dots and labels will stay there.
+
+Considering the major technical Challenges we have encountered during the development of our D3-based Interactive Visualizations, a possible improvemnt is to build a LAMP(Linux operating system, Apache HTTP Server, MySQL relational database management system (RDBMS) and PHP programming language)-based web application. Thus, we will be able to store the processed datasets in the MySQL database, then render them interactively through the User Interface of the web app so that we can publish more interactive visualizations for other interesting findings in our EDAV Final Report.
+
+In addition, it is also desirable to put other functional buttons on the webpage in the future, like Print, Download, and so on. Thus, if people who read this webpge like our findings, they can easily save the graph for future usage.
+
+
+# Conclusions
+
+We learned a lot about the Student Loan program.  The rise in the absolute amount of Debt and percentage of Debt, 'not in repayment' combined with the demographic shift of debt into older borrowers should scare all US taxpayers.  Future areas of work that we didn't have time to look at include:
+- explaining the age demographic shift (our most interesting finding) for example by comparing to normal demographic shift in the country or by looking at college enrollment data to see if enrollment age changed.
+- explore age demographic distribution of student debt by state and compare to censuses data
+- look at 'default rate' again and only look at the states with high/low debt loads excluding the ones in the middle to see if there's a stronger relationship
+- look at other economic data at the state level to try to explain why the south has more debt, for example presence of for-profit schools, private/public schools, state-school graduation rates and presence of professional schools by state
+- look at the price of higher education and how it changed relative to debt (that should also explain the rise in debt relative to number of borrowers)
+
+We also learned a lot about doing data science and EDAV work.  Beyond learning a lot more of R and D3 we learned:
+- to focus on simple variable first and probably do 70% or 80% of the analysis this way first (we probably 40-50%)
+- not to focus too much on complex analysis only do 20-30% (we probably did 40-50%)
+- try to explain extensively national level trends before digging into state or regional trends.  We tried to jump into the state distribution of debt and explain the regional breakdown but couldn't find strong insights while our national level findings were very interesting and we could have done more there
+- not to worry about getting strong initial comprehensive data set as the progression of the analysis resulted in amalgamation of one
+- think about the right problems to use interactivity for. for example, pick interactive displays for problems that require much visualization and many variables/trends
+
