@@ -1,1 +1,1 @@
-EDAV_Final_Project 
+This is a repo for our EDAV Final Project at Columbia.
