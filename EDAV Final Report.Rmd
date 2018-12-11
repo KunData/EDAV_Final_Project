@@ -47,7 +47,7 @@ We worked together on the project with Yadin Rozov doing more of the work on rep
 
 Our approach was to start by asking the below questions about the topic and to start by analyzing basic variables first while building our data set and understanding as we progressed in complexity.  This worked well in particularly as it pertained to information about how the Federal Portfolio is distributed across the states and haw various variables relate to each other.
 
-Besides this Final Report, we have created a Repo for this project at GitHub to hold related datasets and Rmd files developed at different stage of our prject. The link to the Repo is: 
+Besides this Final Report, we have created a Repo for this project at GitHub to hold related datasets and Rmd files developed at different stages of our prject. The link to the Repo is: 
 
 https://github.com/KunData/EDAV_Final_Project
 
@@ -710,7 +710,7 @@ p44
 aggByAgg_1 <- aggByAgg
 ```
 
-Two shocking results came out:  First the percentage of debt held by people under 30% has gone down from 42.8% to 27% and second that the debt load has been picked up by both the middle-age population who went from 47% to 53% and the population of people older than 50 almost doubled from 10% to 19%.
+Two shocking results came out:  First the percentage of debt held by people under 30 has gone down from 42.8% to 27% and second that the debt load has been picked up by both the middle-age population who went from 47% to 53% and the population of people older than 50 almost doubled from 10% to 19%.
 
 We next looked at the same type of analysis using the number of borrowers in each group as opposed to amount of debt, also obtained from the NY Fed data.
 
@@ -1515,16 +1515,18 @@ In addition, it is also desirable to put other functional buttons on the webpage
 # Conclusions
 
 We learned a lot about the Student Loan program.  The rise in the absolute amount of Debt and percentage of Debt, 'not in repayment' combined with the demographic shift of debt into older borrowers should scare all US taxpayers.  Future areas of work that we didn't have time to look at include:
-- explaining the age demographic shift (our most interesting finding) for example by comparing to normal demographic shift in the country or by looking at college enrollment data to see if enrollment age changed.
-- explore age demographic distribution of student debt by state and compare to censuses data
-- look at 'default rate' again and only look at the states with high/low debt loads excluding the ones in the middle to see if there's a stronger relationship
-- look at other economic data at the state level to try to explain why the south has more debt, for example presence of for-profit schools, private/public schools, state-school graduation rates and presence of professional schools by state
-- look at the price of higher education and how it changed relative to debt (that should also explain the rise in debt relative to number of borrowers)
+
++ explaining the age demographic shift (our most interesting finding) for example by comparing to normal demographic shift in the country or by looking at college enrollment data to see if enrollment age changed.
++ explore age demographic distribution of student debt by state and compare to censuses data
++ look at 'default rate' again and only look at the states with high/low debt loads excluding the ones in the middle to see if there's a stronger relationship
++ look at other economic data at the state level to try to explain why the south has more debt, for example presence of for-profit schools, private/public schools, state-school graduation rates and presence of professional schools by state
++ look at the price of higher education and how it changed relative to debt (that should also explain the rise in debt relative to number of borrowers)
 
 We also learned a lot about doing data science and EDAV work.  Beyond learning a lot more of R and D3 we learned:
-- to focus on simple variable first and probably do 70% or 80% of the analysis this way first (we probably 40-50%)
-- not to focus too much on complex analysis only do 20-30% (we probably did 40-50%)
-- try to explain extensively national level trends before digging into state or regional trends.  We tried to jump into the state distribution of debt and explain the regional breakdown but couldn't find strong insights while our national level findings were very interesting and we could have done more there
-- not to worry about getting strong initial comprehensive data set as the progression of the analysis resulted in amalgamation of one
-- think about the right problems to use interactivity for. for example, pick interactive displays for problems that require much visualization and many variables/trends
+
++ to focus on simple variable first and probably do 70% or 80% of the analysis this way first (we probably 40-50%)
++ not to focus too much on complex analysis only do 20-30% (we probably did 40-50%)
++ try to explain extensively national level trends before digging into state or regional trends.  We tried to jump into the state distribution of debt and explain the regional breakdown but couldn't find strong insights while our national level findings were very interesting and we could have done more there
++ not to worry about getting strong initial comprehensive data set as the progression of the analysis resulted in amalgamation of one
++ think about the right problems to use interactivity for. for example, pick interactive displays for problems that require much visualization and many variables/trends
 
